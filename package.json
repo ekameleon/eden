@@ -25,16 +25,14 @@
     "type": "module",
     "main": "./dist/eden.cjs",
     "module": "./dist/eden.mjs",
-    "browser": "./dist/eden.min.js",
+    "types": "./dist/index.d.ts",
     "unpkg": "./dist/eden.min.js",
     "jsdelivr": "./dist/eden.min.js",
-    "types": "./dist/eden.d.ts",
     "exports": {
         ".": {
-            "types": "./dist/eden.d.ts",
+            "types": "./dist/index.d.ts",
             "import": "./dist/eden.mjs",
             "require": "./dist/eden.cjs",
-            "browser": "./dist/eden.min.js",
             "default": "./dist/eden.mjs"
         },
         "./package.json": "./package.json"
