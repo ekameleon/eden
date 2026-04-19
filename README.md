@@ -103,6 +103,49 @@ const edenText = fromJSON(jsonSource);
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full public API and
 option reference.
 
+## Documentation
+
+Full end-user documentation lives under [`doc/`](./doc):
+
+- English: [`doc/en/`](./doc/en)
+- Français : [`doc/fr/`](./doc/fr)
+
+The two trees are kept in sync. `SPEC.md` and `ARCHITECTURE.md` remain
+the authoritative references for the grammar and the implementation.
+
+## Development
+
+eden is built and tested with [Bun](https://bun.sh) (≥ 1.1). Node 18+ is
+required only because `tsc` (used to generate the `.d.ts`) runs on Node.
+
+```bash
+bun install
+bun test              # run the full test suite
+bun test --watch      # rerun on file changes
+bun run build         # emit dist/eden.{mjs,cjs,js,min.js,d.ts}
+```
+
+### Conformance fixtures
+
+The `test/` directory holds unit tests per module **and** a conformance
+harness at [`test/conformance.test.js`](./test/conformance.test.js).
+The harness auto-discovers every fixture under `test/fixtures/parse/`
+and checks that `parse(<eden source>)` deep-equals the value encoded in
+the matching `.json` file.
+
+Adding a new conformance fixture is a two-file drop:
+
+```
+test/fixtures/parse/042-my-feature.eden   ← eden source text
+test/fixtures/parse/042-my-feature.json   ← expected value, JSON-encoded
+```
+
+No change to the harness or to any registry is required — the next
+`bun test` will pick it up.
+
+These fixtures are the source of truth shared with the future PHP port,
+so please keep them minimal, focused on one feature each, and stable.
+
 ## Grammar
 
 See [`SPEC.md`](./SPEC.md) for the normative grammar and semantics.

@@ -1,0 +1,32 @@
+name: CI
+
+on:
+    push:
+        branches: [main]
+
+jobs:
+    build-and-test:
+        name: build and test (Node 20 + Bun)
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js 20
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+
+            - name: Setup Bun
+              uses: oven-sh/setup-bun@v2
+              with:
+                  bun-version: latest
+
+            - name: Install dependencies
+              run: bun install --frozen-lockfile
+
+            - name: Run tests
+              run: bun test
+
+            - name: Build
+              run: bun run build
