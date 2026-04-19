@@ -66,7 +66,8 @@ These are contracts, not suggestions.
 ## 4. Dependencies
 
 - **Runtime dependencies: zero.** This is a standalone library.
-- **Dev dependencies:** only `typescript` for `.d.ts` generation. Nothing else.
+- **Dev dependencies:** `typescript` (for `.d.ts` generation) and `esbuild`
+  (for IIFE builds, pending Bun support). Nothing else.
 - If you think you need a new dependency, **stop and ask.** The answer will
   almost always be no.
 
@@ -82,7 +83,11 @@ These are contracts, not suggestions.
 
 ## 6. Build & distribution
 
-- Build is driven by **Bun only**. Never add Babel, webpack, rollup, or esbuild.
+- Build is driven by **Bun** (ESM, CJS) and **esbuild** (IIFE, minified IIFE).
+  esbuild is used only because Bun does not yet support IIFE output with a
+  global name. Once Bun ships this feature, esbuild should be removed.
+- `tsc` is used only for `.d.ts` generation from JSDoc.
+- Never add Babel, webpack, rollup, or any other build tool.
 - `bun run build` must produce: ESM, CJS, IIFE, IIFE-minified, and `.d.ts`.
 - Source code must remain usable as-is in modern browsers and Node 18+ without
   transpilation.

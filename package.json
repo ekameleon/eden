@@ -55,8 +55,8 @@
         "clean": "rm -rf dist",
         "build:esm": "bun build ./src/index.js --outfile ./dist/eden.mjs --target browser --format esm",
         "build:cjs": "bun build ./src/index.js --outfile ./dist/eden.cjs --target node --format cjs",
-        "build:iife": "bun build ./src/index.js --outfile ./dist/eden.js --target browser --format iife --global-name eden",
-        "build:min": "bun build ./src/index.js --outfile ./dist/eden.min.js --target browser --format iife --global-name eden --minify",
+        "build:iife": "esbuild ./src/index.js --bundle --format=iife --global-name=eden --outfile=./dist/eden.js --target=es2022 --platform=browser",
+        "build:min": "esbuild ./src/index.js --bundle --format=iife --global-name=eden --outfile=./dist/eden.min.js --target=es2022 --platform=browser --minify",
         "build:dts": "tsc -p tsconfig.build.json",
         "build": "bun run clean && bun run build:esm && bun run build:cjs && bun run build:iife && bun run build:min && bun run build:dts",
         "test": "bun test",
@@ -65,6 +65,7 @@
         "prepublishOnly": "bun run build && bun test"
     },
     "devDependencies": {
-        "typescript": "^5.6.0"
+        "esbuild": "^0.24.2",
+        "typescript": "^5.9.3"
     }
 }
