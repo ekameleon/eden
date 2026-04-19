@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "checkJs": false,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "outFile": "./dist/eden.d.ts",
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "Bundler"
+    },
+    "include": ["src/**/*.js"]
+}

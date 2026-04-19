@@ -1,3 +1,9 @@
+#IDE
+.idea
+
+#AI
+.claude
+
 # Logs
 logs
 *.log

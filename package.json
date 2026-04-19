@@ -1,0 +1,70 @@
+{
+    "name": "@ekameleon/eden",
+    "version": "0.1.0",
+    "description": "eden — ECMAScript Data Exchange Notation. A human-friendly superset of JSON.",
+    "keywords": [
+        "eden",
+        "json",
+        "json5",
+        "data",
+        "serialization",
+        "parser",
+        "config",
+        "ecmascript"
+    ],
+    "author": "Marc Alcaraz",
+    "license": "MPL-2.0",
+    "homepage": "https://github.com/ekameleon/eden",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/ekameleon/eden.git"
+    },
+    "bugs": {
+        "url": "https://github.com/ekameleon/eden/issues"
+    },
+    "type": "module",
+    "main": "./dist/eden.cjs",
+    "module": "./dist/eden.mjs",
+    "browser": "./dist/eden.min.js",
+    "unpkg": "./dist/eden.min.js",
+    "jsdelivr": "./dist/eden.min.js",
+    "types": "./dist/eden.d.ts",
+    "exports": {
+        ".": {
+            "types": "./dist/eden.d.ts",
+            "import": "./dist/eden.mjs",
+            "require": "./dist/eden.cjs",
+            "browser": "./dist/eden.min.js",
+            "default": "./dist/eden.mjs"
+        },
+        "./package.json": "./package.json"
+    },
+    "files": [
+        "dist",
+        "src",
+        "SPEC.md",
+        "ARCHITECTURE.md",
+        "README.md",
+        "LICENSE"
+    ],
+    "sideEffects": false,
+    "engines": {
+        "node": ">=18.0.0"
+    },
+    "scripts": {
+        "clean": "rm -rf dist",
+        "build:esm": "bun build ./src/index.js --outfile ./dist/eden.mjs --target browser --format esm",
+        "build:cjs": "bun build ./src/index.js --outfile ./dist/eden.cjs --target node --format cjs",
+        "build:iife": "bun build ./src/index.js --outfile ./dist/eden.js --target browser --format iife --global-name eden",
+        "build:min": "bun build ./src/index.js --outfile ./dist/eden.min.js --target browser --format iife --global-name eden --minify",
+        "build:dts": "tsc -p tsconfig.build.json",
+        "build": "bun run clean && bun run build:esm && bun run build:cjs && bun run build:iife && bun run build:min && bun run build:dts",
+        "test": "bun test",
+        "test:watch": "bun test --watch",
+        "bench": "bun run bench/run.js",
+        "prepublishOnly": "bun run build && bun test"
+    },
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}
