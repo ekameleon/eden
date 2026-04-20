@@ -596,3 +596,336 @@ describe( "lexer — ECMAScript reserved words" , () =>
         expect( caught.column ).toBe( 3 ) ;
     } ) ;
 } ) ;
+
+describe( "lexer — decimal numbers" , () =>
+{
+    test.each(
+    [
+        "0" ,
+        "1" ,
+        "42" ,
+        "1000000"
+    ] )( "integer %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.NUMBER ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test.each(
+    [
+        "0.5" ,
+        "1.5" ,
+        ".5" ,
+        "3.141592653589793"
+    ] )( "fraction %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        "1e10" ,
+        "2.5e-3" ,
+        "1E+0" ,
+        "1e0" ,
+        ".5e2"
+    ] )( "exponent %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "trailing dot without digits is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "1." ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "decimal digits expected after \"." ) ;
+        expect( caught.offset ).toBe( 1 ) ;
+    } ) ;
+
+    test( "exponent without digits is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "1e" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "decimal digits expected in exponent" ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — hex, octal and binary numbers" , () =>
+{
+    test.each(
+    [
+        "0xFF"   , "0Xff"   , "0x0"     ,
+        "0o17"   , "0O17"   , "0o7"     ,
+        "0b101"  , "0B101"  , "0b0"
+    ] )( "non-decimal base %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        [ "0x"  , "Missing digits after \"0x\" prefix." ] ,
+        [ "0o"  , "Missing digits after \"0o\" prefix." ] ,
+        [ "0b"  , "Missing digits after \"0b\" prefix." ]
+    ] )( "empty prefix %p throws" , ( source , expectedMessage ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message ).toBe( expectedMessage ) ;
+        expect( caught.offset ).toBe( 0 ) ;
+    } ) ;
+
+    test( "hex digit 8 is rejected for binary (stops reading)" , () =>
+    {
+        // "0b18" stops at "0b1", then "8" is trailing identifier-like → error
+        let caught = null ;
+        try
+        {
+            tokenize( "0b18" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unexpected character" ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — numeric separators" , () =>
+{
+    test.each(
+    [
+        "1_000" ,
+        "1_000_000" ,
+        "1_000.5" ,
+        "0xF_F" ,
+        "0o1_7" ,
+        "0b1_0_1" ,
+        "1_000e1_0"
+    ] )( "valid separator usage %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        "1_"      ,
+        "1__0"    ,
+        "1_.5"    ,
+        "0xFF_"   ,
+        "0o1_"    ,
+        "1e1_"
+    ] )( "invalid separator usage %p throws" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "numeric separator must appear between digits" ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — BigInt" , () =>
+{
+    test.each(
+    [
+        "0n"       ,
+        "42n"      ,
+        "1_000n"   ,
+        "0xFFn"    ,
+        "0o17n"    ,
+        "0b101n"
+    ] )( "valid BigInt %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.BIGINT ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "BigInt with fraction is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "1.5n" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "bigint literals cannot have a fractional part" ) ;
+        expect( caught.offset ).toBe( 0 ) ;
+    } ) ;
+
+    test( "BigInt with exponent is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "1e5n" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "bigint literals cannot have an exponent" ) ;
+        expect( caught.offset ).toBe( 0 ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — legacy octals and trailing identifiers" , () =>
+{
+    test.each(
+    [
+        "08"    , "09"    , "0777"  , "00"
+    ] )( "legacy octal %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "legacy octal" ) ;
+        expect( caught.offset ).toBe( 0 ) ;
+    } ) ;
+
+    test( "identifier immediately after a number is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "123abc" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unexpected character" ) ;
+        expect( caught.offset ).toBe( 3 ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — numbers adjacent to other tokens" , () =>
+{
+    test( "negative number is tokenized as punctuator + number" , () =>
+    {
+        const tokens = tokenize( "-1.5" ) ;
+        expect( tokens.map( ( t ) => t.type ) ).toEqual(
+        [
+            TokenType.PUNCTUATOR ,
+            TokenType.NUMBER ,
+            TokenType.EOF
+        ] ) ;
+        expect( tokens.map( ( t ) => t.value ) ).toEqual(
+            [ "-" , "1.5" , "" ]
+        ) ;
+    } ) ;
+
+    test( "array of numbers [1, 2, 3]" , () =>
+    {
+        const tokens = tokenize( "[1, 2, 3]" ) ;
+        expect( tokens.map( ( t ) => t.type ) ).toEqual(
+        [
+            TokenType.PUNCTUATOR ,
+            TokenType.NUMBER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.NUMBER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.NUMBER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.EOF
+        ] ) ;
+    } ) ;
+
+    test( "1+2 tokenizes as three tokens (no sign absorbed)" , () =>
+    {
+        const tokens = tokenize( "1+2" ) ;
+        expect( tokens.map( ( t ) => ( { type: t.type , value: t.value } ) ) ).toEqual(
+        [
+            { type: TokenType.NUMBER    , value: "1" } ,
+            { type: TokenType.PUNCTUATOR, value: "+" } ,
+            { type: TokenType.NUMBER    , value: "2" } ,
+            { type: TokenType.EOF       , value: ""  }
+        ] ) ;
+    } ) ;
+
+    test( ".5 after whitespace is a number" , () =>
+    {
+        const tokens = tokenize( "  .5" ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 0 ].value ).toBe( ".5" ) ;
+    } ) ;
+
+    test( "positions after multi-char number" , () =>
+    {
+        const tokens = tokenize( "1_000 foo" ) ;
+        expect( tokens[ 0 ].value  ).toBe( "1_000" ) ;
+        expect( tokens[ 0 ].column ).toBe( 1 ) ;
+        expect( tokens[ 1 ].value  ).toBe( "foo" ) ;
+        expect( tokens[ 1 ].column ).toBe( 7 ) ;
+    } ) ;
+} ) ;

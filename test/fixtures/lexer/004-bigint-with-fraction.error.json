@@ -1,0 +1,7 @@
+{
+    "class":   "EdenSyntaxError",
+    "message": "bigint literals cannot have a fractional part",
+    "line":    1,
+    "column":  1,
+    "offset":  0
+}

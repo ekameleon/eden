@@ -1,0 +1,7 @@
+{
+    "class":   "EdenSyntaxError",
+    "message": "numeric separator must appear between digits",
+    "line":    1,
+    "column":  6,
+    "offset":  5
+}

@@ -38,20 +38,13 @@ const BOM             = "\uFEFF" ;
 const SPACE_SEPARATOR = /\p{Zs}/u ;
 
 /**
- * Handwritten character-level lexer.
+ * Hand-written character-level lexer.
  *
  * The class is exposed within the package but is **not** part of the
  * public API — consumers should import `tokenize()` instead.
  */
 export default class Lexer
 {
-    /** @type {string} */ #source ;
-    /** @type {number} */ #length ;
-    /** @type {number} */ #offset ;
-    /** @type {number} */ #line ;
-    /** @type {number} */ #column ;
-    /** @type {import("./createToken.js").Token[]} */ #tokens ;
-
     /**
      * @param {string} source - The eden source text to tokenize.
      * @throws {TypeError}    - If `source` is not a string.
@@ -113,6 +106,18 @@ export default class Lexer
                 this.#unexpected( char ) ;
             }
 
+            if ( this.#isDecimalDigit( char ) )
+            {
+                this.#readNumber() ;
+                continue ;
+            }
+
+            if ( char === "." && this.#isDecimalDigit( this.#source[ this.#offset + 1 ] ) )
+            {
+                this.#readNumber() ;
+                continue ;
+            }
+
             if ( this.#isPunctuatorStart( char ) )
             {
                 this.#readPunctuator( char ) ;
@@ -142,45 +147,22 @@ export default class Lexer
         return this.#tokens ;
     }
 
-    /**
-     * Returns `true` if the given character is recognized as white
-     * space per SPEC.md §2.2.
-     *
-     * @param   {string} char
-     * @returns {boolean}
-     */
-    #isWhitespace( char )
-    {
-        switch ( char )
-        {
-            case "\t" :
-            case "\v" :
-            case "\f" :
-            case " "  :
-            case NBSP :
-            case BOM  :
-                return true ;
-
-            default :
-                return SPACE_SEPARATOR.test( char ) ;
-        }
-    }
+    /** @type {number} */ #column ;
+    /** @type {number} */ #length ;
+    /** @type {number} */ #line ;
+    /** @type {number} */ #offset ;
+    /** @type {string} */ #source ;
+    /** @type {import("./createToken.js").Token[]} */ #tokens ;
 
     /**
-     * Returns `true` if the given character is a line terminator per
-     * SPEC.md §2.3.
-     *
-     * @param   {string} char
-     * @returns {boolean}
+     * Advances the cursor by a single character (not a line
+     * terminator). Updates `offset` and `column`; leaves `line`
+     * unchanged.
      */
-    #isLineTerminator( char )
+    #advance()
     {
-        return (
-            char === LINE_FEED       ||
-            char === CARRIAGE_RETURN ||
-            char === LINE_SEPARATOR  ||
-            char === PARAGRAPH_SEP
-        ) ;
+        this.#offset += 1 ;
+        this.#column += 1 ;
     }
 
     /**
@@ -207,23 +189,73 @@ export default class Lexer
     }
 
     /**
-     * Advances the cursor by a single character (not a line
-     * terminator). Updates `offset` and `column`; leaves `line`
-     * unchanged.
+     * Returns `true` if `char` is an ASCII binary digit 0 or 1.
+     *
+     * @param   {string} char
+     * @returns {boolean}
      */
-    #advance()
+    #isBinaryDigit( char )
     {
-        this.#offset += 1 ;
-        this.#column += 1 ;
+        return char === "0" || char === "1" ;
+    }
+
+    /**
+     * Returns `true` if `char` is an ASCII decimal digit 0–9.
+     *
+     * @param   {string} char
+     * @returns {boolean}
+     */
+    #isDecimalDigit( char )
+    {
+        return char >= "0" && char <= "9" ;
+    }
+
+    /**
+     * Returns `true` if `char` is an ASCII hexadecimal digit
+     * 0–9, a–f, or A–F.
+     *
+     * @param   {string} char
+     * @returns {boolean}
+     */
+    #isHexDigit( char )
+    {
+        return ( char >= "0" && char <= "9" ) ||
+               ( char >= "a" && char <= "f" ) ||
+               ( char >= "A" && char <= "F" ) ;
+    }
+
+    /**
+     * Returns `true` if the given character is a line terminator per
+     * SPEC.md §2.3.
+     *
+     * @param   {string} char
+     * @returns {boolean}
+     */
+    #isLineTerminator( char )
+    {
+        return (
+            char === LINE_FEED       ||
+            char === CARRIAGE_RETURN ||
+            char === LINE_SEPARATOR  ||
+            char === PARAGRAPH_SEP
+        ) ;
+    }
+
+    /**
+     * Returns `true` if `char` is an ASCII octal digit 0–7.
+     *
+     * @param   {string} char
+     * @returns {boolean}
+     */
+    #isOctalDigit( char )
+    {
+        return char >= "0" && char <= "7" ;
     }
 
     /**
      * Returns `true` if `char` may start a punctuator token per
      * SPEC.md §2.5. The `"..."` token is handled in
      * `#readPunctuator()` via a two-character lookahead.
-     *
-     * Note: numeric literals starting with `.` (for example `.5`)
-     * are not yet recognized; they will be handled in sub-step 4.
      *
      * @param   {string} char
      * @returns {boolean}
@@ -246,83 +278,37 @@ export default class Lexer
     }
 
     /**
-     * Reads a single punctuator token starting at the current
-     * offset and pushes it to the output stream. Handles the
-     * three-character lookahead for `"..."`.
+     * Returns `true` if the given character is recognized as white
+     * space per SPEC.md §2.2.
      *
-     * @param {string} char - The first character of the punctuator.
+     * @param   {string} char
+     * @returns {boolean}
      */
-    #readPunctuator( char )
+    #isWhitespace( char )
     {
-        const startOffset = this.#offset ;
-        const startLine   = this.#line ;
-        const startColumn = this.#column ;
-
-        let value = char ;
-
-        if ( char === "." &&
-             this.#source[ this.#offset + 1 ] === "." &&
-             this.#source[ this.#offset + 2 ] === "." )
+        switch ( char )
         {
-            value = "..." ;
-            this.#offset += 3 ;
-            this.#column += 3 ;
+            case "\t" :
+            case "\v" :
+            case "\f" :
+            case " "  :
+            case NBSP :
+            case BOM  :
+                return true ;
+
+            default :
+                return SPACE_SEPARATOR.test( char ) ;
         }
-        else
-        {
-            this.#offset += 1 ;
-            this.#column += 1 ;
-        }
-
-        this.#tokens.push( createToken(
-            TokenType.PUNCTUATOR ,
-            value ,
-            startOffset ,
-            startLine ,
-            startColumn
-        ) ) ;
-    }
-
-    /**
-     * Reads a `//` line comment starting at the current offset.
-     * The comment runs up to (but not including) the next line
-     * terminator or end of input; the terminator itself is left
-     * for the main loop to consume, so `#line` and `#column` are
-     * updated correctly.
-     */
-    #readLineComment()
-    {
-        const startOffset = this.#offset ;
-        const startLine   = this.#line ;
-        const startColumn = this.#column ;
-
-        let end = this.#offset ;
-        while ( end < this.#length && !this.#isLineTerminator( this.#source[ end ] ) )
-        {
-            end += 1 ;
-        }
-
-        const value = this.#source.slice( startOffset , end ) ;
-        this.#column += end - this.#offset ;
-        this.#offset  = end ;
-
-        this.#tokens.push( createToken(
-            TokenType.LINE_COMMENT ,
-            value ,
-            startOffset ,
-            startLine ,
-            startColumn
-        ) ) ;
     }
 
     /**
      * Reads a `/* ... *\/` block comment starting at the current
      * offset. Block comments do not nest (SPEC.md §2.4); the first
-     * `*\/` encountered ends the comment. Embedded line
-     * terminators (including CRLF) correctly update `#line` and
-     * `#column`. If end-of-input is reached before the closing
-     * `*\/`, an `EdenSyntaxError` is raised at the position of the
-     * opening `/*`.
+     * `*\/` encountered ends the comment. Embedded line terminators
+     * (including CRLF) correctly update `#line` and `#column`. If
+     * end-of-input is reached before the closing `*\/`, an
+     * `EdenSyntaxError` is raised at the position of the opening
+     * `/*`.
      */
     #readBlockComment()
     {
@@ -375,8 +361,62 @@ export default class Lexer
     }
 
     /**
-     * Reads an identifier-like lexeme starting at the current offset,
-     * classifies it, and pushes the resulting token.
+     * Reads a run of valid digits at the current offset, allowing
+     * `_` separators strictly between digits. The caller must
+     * ensure that `#offset` points at a valid digit before calling.
+     *
+     * Separator rules mirror ECMAScript 2022:
+     *   - `_` may appear only between two valid digits;
+     *   - `_` at the start, at the end, or doubled is rejected;
+     *   - `_` adjacent to a prefix (`0x_`) or to `.` is caught
+     *     naturally by the surrounding reader.
+     *
+     * @param {(ch: string) => boolean} isValidDigit
+     * @throws {EdenSyntaxError}
+     */
+    #readDigits( isValidDigit )
+    {
+        this.#offset += 1 ;
+        this.#column += 1 ;
+
+        while ( this.#offset < this.#length )
+        {
+            const ch = this.#source[ this.#offset ] ;
+
+            if ( ch === "_" )
+            {
+                const nextCh = this.#source[ this.#offset + 1 ] ;
+                if ( nextCh === undefined || !isValidDigit( nextCh ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Numeric separator must appear between digits." ,
+                        {
+                            source: this.#source ,
+                            offset: this.#offset ,
+                            line:   this.#line ,
+                            column: this.#column
+                        }
+                    ) ;
+                }
+                this.#offset += 1 ;
+                this.#column += 1 ;
+                continue ;
+            }
+
+            if ( isValidDigit( ch ) )
+            {
+                this.#offset += 1 ;
+                this.#column += 1 ;
+                continue ;
+            }
+
+            break ;
+        }
+    }
+
+    /**
+     * Reads an identifier-like lexeme starting at the current
+     * offset, classifies it, and pushes the resulting token.
      *
      * Classification per SPEC.md §2.6:
      *   - eden value or operation keyword → `TokenType.KEYWORD`
@@ -445,6 +485,311 @@ export default class Lexer
 
         this.#tokens.push( createToken(
             TokenType.IDENTIFIER ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
+    }
+
+    /**
+     * Reads a `//` line comment starting at the current offset. The
+     * comment runs up to (but not including) the next line terminator
+     * or end of input; the terminator itself is left for the main
+     * loop to consume, so `#line` and `#column` are updated correctly.
+     */
+    #readLineComment()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let end = this.#offset ;
+        while ( end < this.#length && !this.#isLineTerminator( this.#source[ end ] ) )
+        {
+            end += 1 ;
+        }
+
+        const value = this.#source.slice( startOffset , end ) ;
+        this.#column += end - this.#offset ;
+        this.#offset  = end ;
+
+        this.#tokens.push( createToken(
+            TokenType.LINE_COMMENT ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
+    }
+
+    /**
+     * Reads a numeric literal (decimal, hex, octal, binary, BigInt)
+     * per SPEC.md §2.8. Signs (`+`/`-`) are **not** part of the
+     * numeric literal itself; they are surfaced as separate
+     * punctuator tokens and reconstructed as `UnaryExpression` by
+     * the parser (SPEC.md §3.1).
+     *
+     * Rejects: legacy octals (`0777`), trailing `.` with no
+     * fraction digits, BigInt with fraction/exponent, numeric
+     * literals immediately followed by an `IdentifierPart` or by
+     * another digit.
+     *
+     * @throws {EdenSyntaxError}
+     */
+    #readNumber()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let hasDot           = false ;
+        let hasExponent      = false ;
+        let isNonDecimalBase = false ;
+
+        const first = this.#source[ this.#offset ] ;
+
+        if ( first === "." )
+        {
+            hasDot = true ;
+            this.#offset += 1 ;
+            this.#column += 1 ;
+            this.#readDigits( ( ch ) => this.#isDecimalDigit( ch ) ) ;
+        }
+        else if ( first === "0" )
+        {
+            const next = this.#source[ this.#offset + 1 ] ;
+
+            if ( next === "x" || next === "X" )
+            {
+                this.#offset += 2 ;
+                this.#column += 2 ;
+                if ( !this.#isHexDigit( this.#source[ this.#offset ] ?? "" ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Missing digits after \"0x\" prefix." ,
+                        {
+                            source: this.#source ,
+                            offset: startOffset ,
+                            line:   startLine ,
+                            column: startColumn
+                        }
+                    ) ;
+                }
+                this.#readDigits( ( ch ) => this.#isHexDigit( ch ) ) ;
+                isNonDecimalBase = true ;
+            }
+            else if ( next === "o" || next === "O" )
+            {
+                this.#offset += 2 ;
+                this.#column += 2 ;
+                if ( !this.#isOctalDigit( this.#source[ this.#offset ] ?? "" ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Missing digits after \"0o\" prefix." ,
+                        {
+                            source: this.#source ,
+                            offset: startOffset ,
+                            line:   startLine ,
+                            column: startColumn
+                        }
+                    ) ;
+                }
+                this.#readDigits( ( ch ) => this.#isOctalDigit( ch ) ) ;
+                isNonDecimalBase = true ;
+            }
+            else if ( next === "b" || next === "B" )
+            {
+                this.#offset += 2 ;
+                this.#column += 2 ;
+                if ( !this.#isBinaryDigit( this.#source[ this.#offset ] ?? "" ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Missing digits after \"0b\" prefix." ,
+                        {
+                            source: this.#source ,
+                            offset: startOffset ,
+                            line:   startLine ,
+                            column: startColumn
+                        }
+                    ) ;
+                }
+                this.#readDigits( ( ch ) => this.#isBinaryDigit( ch ) ) ;
+                isNonDecimalBase = true ;
+            }
+            else if ( next !== undefined && this.#isDecimalDigit( next ) )
+            {
+                throw new EdenSyntaxError(
+                    "Legacy octal literals are not supported; use the \"0o\" prefix." ,
+                    {
+                        source: this.#source ,
+                        offset: startOffset ,
+                        line:   startLine ,
+                        column: startColumn
+                    }
+                ) ;
+            }
+            else
+            {
+                this.#offset += 1 ;
+                this.#column += 1 ;
+            }
+        }
+        else
+        {
+            this.#readDigits( ( ch ) => this.#isDecimalDigit( ch ) ) ;
+        }
+
+        if ( !isNonDecimalBase && !hasDot && this.#source[ this.#offset ] === "." )
+        {
+            const after = this.#source[ this.#offset + 1 ] ;
+            if ( after === undefined || !this.#isDecimalDigit( after ) )
+            {
+                throw new EdenSyntaxError(
+                    "Decimal digits expected after \".\"." ,
+                    {
+                        source: this.#source ,
+                        offset: this.#offset ,
+                        line:   this.#line ,
+                        column: this.#column
+                    }
+                ) ;
+            }
+            hasDot = true ;
+            this.#offset += 1 ;
+            this.#column += 1 ;
+            this.#readDigits( ( ch ) => this.#isDecimalDigit( ch ) ) ;
+        }
+
+        if ( !isNonDecimalBase )
+        {
+            const ch = this.#source[ this.#offset ] ;
+            if ( ch === "e" || ch === "E" )
+            {
+                const expOffset = this.#offset ;
+                const expLine   = this.#line ;
+                const expColumn = this.#column ;
+
+                this.#offset += 1 ;
+                this.#column += 1 ;
+
+                const sign = this.#source[ this.#offset ] ;
+                if ( sign === "+" || sign === "-" )
+                {
+                    this.#offset += 1 ;
+                    this.#column += 1 ;
+                }
+
+                if ( !this.#isDecimalDigit( this.#source[ this.#offset ] ?? "" ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Decimal digits expected in exponent." ,
+                        {
+                            source: this.#source ,
+                            offset: expOffset ,
+                            line:   expLine ,
+                            column: expColumn
+                        }
+                    ) ;
+                }
+
+                this.#readDigits( ( ch2 ) => this.#isDecimalDigit( ch2 ) ) ;
+                hasExponent = true ;
+            }
+        }
+
+        let isBigInt = false ;
+        if ( this.#source[ this.#offset ] === "n" )
+        {
+            if ( hasDot )
+            {
+                throw new EdenSyntaxError(
+                    "BigInt literals cannot have a fractional part." ,
+                    {
+                        source: this.#source ,
+                        offset: startOffset ,
+                        line:   startLine ,
+                        column: startColumn
+                    }
+                ) ;
+            }
+            if ( hasExponent )
+            {
+                throw new EdenSyntaxError(
+                    "BigInt literals cannot have an exponent." ,
+                    {
+                        source: this.#source ,
+                        offset: startOffset ,
+                        line:   startLine ,
+                        column: startColumn
+                    }
+                ) ;
+            }
+            isBigInt = true ;
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        if ( this.#offset < this.#length )
+        {
+            const cp       = this.#source.codePointAt( this.#offset ) ;
+            const nextChar = String.fromCodePoint( cp ) ;
+
+            if ( this.#isDecimalDigit( nextChar ) || isIdentifierStart( nextChar ) )
+            {
+                throw new EdenSyntaxError(
+                    `Unexpected character "${ nextChar }" after numeric literal.` ,
+                    {
+                        source: this.#source ,
+                        offset: this.#offset ,
+                        line:   this.#line ,
+                        column: this.#column
+                    }
+                ) ;
+            }
+        }
+
+        const value = this.#source.slice( startOffset , this.#offset ) ;
+        this.#tokens.push( createToken(
+            isBigInt ? TokenType.BIGINT : TokenType.NUMBER ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
+    }
+
+    /**
+     * Reads a single punctuator token starting at the current offset
+     * and pushes it to the output stream. Handles the
+     * three-character lookahead for `"..."`.
+     *
+     * @param {string} char - The first character of the punctuator.
+     */
+    #readPunctuator( char )
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let value = char ;
+
+        if ( char === "." &&
+             this.#source[ this.#offset + 1 ] === "." &&
+             this.#source[ this.#offset + 2 ] === "." )
+        {
+            value = "..." ;
+            this.#offset += 3 ;
+            this.#column += 3 ;
+        }
+        else
+        {
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        this.#tokens.push( createToken(
+            TokenType.PUNCTUATOR ,
             value ,
             startOffset ,
             startLine ,
