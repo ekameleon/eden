@@ -15,12 +15,15 @@
  * next sub-steps.
  */
 
-import EdenSyntaxError  from "../errors/EdenSyntaxError.js" ;
-import TokenType        from "../lexer/TokenType.js" ;
-import createLiteral    from "./ast/createLiteral.js" ;
-import createProgram    from "./ast/createProgram.js" ;
-import LiteralKind      from "./ast/LiteralKind.js" ;
-import ProgramMode      from "./ast/ProgramMode.js" ;
+import EdenSyntaxError     from "../errors/EdenSyntaxError.js" ;
+import TokenType           from "../lexer/TokenType.js" ;
+import createLiteral       from "./ast/createLiteral.js" ;
+import createProgram       from "./ast/createProgram.js" ;
+import LiteralKind         from "./ast/LiteralKind.js" ;
+import ProgramMode         from "./ast/ProgramMode.js" ;
+import parseBigIntLiteral  from "./helpers/parseBigIntLiteral.js" ;
+import parseNumericLiteral from "./helpers/parseNumericLiteral.js" ;
+import parseStringLiteral  from "./helpers/parseStringLiteral.js" ;
 
 /**
  * Handwritten recursive-descent parser.
@@ -95,6 +98,24 @@ export default class Parser
     }
 
     /**
+     * Builds a `Literal` AST node from a `BIGINT` token.
+     *
+     * @param   {import("../lexer/createToken.js").Token} token
+     * @returns {import("./ast/createLiteral.js").Literal}
+     */
+    #parseLiteralBigInt( token )
+    {
+        return createLiteral(
+            parseBigIntLiteral( token.value ) ,
+            token.value ,
+            LiteralKind.BIGINT ,
+            token.offset ,
+            token.line ,
+            token.column
+        ) ;
+    }
+
+    /**
      * Builds a `Literal` AST node for the given value keyword token.
      *
      * @param   {import("../lexer/createToken.js").Token} token
@@ -137,6 +158,64 @@ export default class Parser
     }
 
     /**
+     * Builds a `Literal` AST node from a `NUMBER` token.
+     *
+     * @param   {import("../lexer/createToken.js").Token} token
+     * @returns {import("./ast/createLiteral.js").Literal}
+     */
+    #parseLiteralNumber( token )
+    {
+        return createLiteral(
+            parseNumericLiteral( token.value ) ,
+            token.value ,
+            LiteralKind.NUMBER ,
+            token.offset ,
+            token.line ,
+            token.column
+        ) ;
+    }
+
+    /**
+     * Builds a `Literal` AST node from a `STRING` token. The token
+     * lexeme is handed to `parseStringLiteral` to resolve every
+     * escape sequence into its final JavaScript string value.
+     *
+     * @param   {import("../lexer/createToken.js").Token} token
+     * @returns {import("./ast/createLiteral.js").Literal}
+     */
+    #parseLiteralString( token )
+    {
+        return createLiteral(
+            parseStringLiteral( token.value ) ,
+            token.value ,
+            LiteralKind.STRING ,
+            token.offset ,
+            token.line ,
+            token.column
+        ) ;
+    }
+
+    /**
+     * Builds a `Literal` AST node from a `TEMPLATE` token. The same
+     * escape-resolution helper is used as for strings; the `kind`
+     * discriminator is what distinguishes the two at the AST level.
+     *
+     * @param   {import("../lexer/createToken.js").Token} token
+     * @returns {import("./ast/createLiteral.js").Literal}
+     */
+    #parseLiteralTemplate( token )
+    {
+        return createLiteral(
+            parseStringLiteral( token.value ) ,
+            token.value ,
+            LiteralKind.TEMPLATE ,
+            token.offset ,
+            token.line ,
+            token.column
+        ) ;
+    }
+
+    /**
      * Parses a single value at the current position and returns its
      * AST node. Dispatches on the next significant token type.
      *
@@ -151,10 +230,13 @@ export default class Parser
             throw this.#syntaxError( "Expected a value." , token ) ;
         }
 
-        if ( token.type === TokenType.KEYWORD )
+        switch ( token.type )
         {
-            this.#consume() ;
-            return this.#parseLiteralKeyword( token ) ;
+            case TokenType.KEYWORD  : return this.#parseLiteralKeyword(  this.#consume() ) ;
+            case TokenType.NUMBER   : return this.#parseLiteralNumber(   this.#consume() ) ;
+            case TokenType.BIGINT   : return this.#parseLiteralBigInt(   this.#consume() ) ;
+            case TokenType.STRING   : return this.#parseLiteralString(   this.#consume() ) ;
+            case TokenType.TEMPLATE : return this.#parseLiteralTemplate( this.#consume() ) ;
         }
 
         throw this.#syntaxError(
