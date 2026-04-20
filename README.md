@@ -158,7 +158,7 @@ See [`SPEC.md`](./SPEC.md) for the normative grammar and semantics.
 ## Roadmap
 
 - [x] Specification (grammar + semantics)
-- [ ] Lexer
+- [x] Lexer
 - [ ] Parser + AST
 - [ ] Serializer
 - [ ] `parse` / `stringify` public API

@@ -1403,3 +1403,159 @@ describe( "lexer — template literals" , () =>
     } ) ;
 } ) ;
 
+describe( "lexer — integration" , () =>
+{
+    test( "JSON-like object with string, number, array and comments" , () =>
+    {
+        const source =
+            "{\n" +
+            "    // a comment\n" +
+            "    name: \"Marc\",\n" +
+            "    age: 42,\n" +
+            "    tags: [\"dev\", \"maker\",],\n" +
+            "}" ;
+
+        const tokens = tokenize( source ) ;
+
+        const types = tokens.map( ( t ) => t.type ) ;
+        expect( types ).toEqual(
+        [
+            TokenType.PUNCTUATOR ,
+            TokenType.LINE_COMMENT ,
+            TokenType.IDENTIFIER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.STRING ,
+            TokenType.PUNCTUATOR ,
+            TokenType.IDENTIFIER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.NUMBER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.IDENTIFIER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.PUNCTUATOR ,
+            TokenType.STRING ,
+            TokenType.PUNCTUATOR ,
+            TokenType.STRING ,
+            TokenType.PUNCTUATOR ,
+            TokenType.PUNCTUATOR ,
+            TokenType.PUNCTUATOR ,
+            TokenType.PUNCTUATOR ,
+            TokenType.EOF
+        ] ) ;
+
+        expect( tokens[ 0 ].line   ).toBe( 1 ) ;
+        expect( tokens[ 1 ].line   ).toBe( 2 ) ;
+        expect( tokens[ 1 ].value  ).toBe( "// a comment" ) ;
+        expect( tokens[ 2 ].line   ).toBe( 3 ) ;
+        expect( tokens[ 2 ].value  ).toBe( "name" ) ;
+        expect( tokens[ 4 ].value  ).toBe( "\"Marc\"" ) ;
+        expect( tokens[ 8 ].value  ).toBe( "42" ) ;
+        expect( tokens.at( -1 ).type ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "multi-line source with template and comments" , () =>
+    {
+        const source =
+            "{\n" +
+            "    /* block\n" +
+            "       comment */\n" +
+            "    query: `SELECT *\n" +
+            "FROM users`,\n" +
+            "    price: 99.99,\n" +
+            "}" ;
+
+        const tokens = tokenize( source ) ;
+
+        const block    = tokens.find( ( t ) => t.type === TokenType.BLOCK_COMMENT ) ;
+        const template = tokens.find( ( t ) => t.type === TokenType.TEMPLATE ) ;
+        const price    = tokens.find( ( t ) => t.value === "99.99" ) ;
+        const eof      = tokens.at( -1 ) ;
+
+        expect( block.line    ).toBe( 2 ) ;
+        expect( block.value   ).toContain( "block" ) ;
+        expect( template.line ).toBe( 4 ) ;
+        expect( template.value ).toContain( "SELECT *" ) ;
+        expect( template.value ).toContain( "FROM users" ) ;
+        expect( price.type    ).toBe( TokenType.NUMBER ) ;
+        expect( eof.type      ).toBe( TokenType.EOF ) ;
+        expect( eof.line      ).toBe( 7 ) ;
+    } ) ;
+
+    test( "every numeric flavor in an array" , () =>
+    {
+        const source = "[0, 1.5, .5, 1e10, 0xFF, 0o17, 0b101, 42n, 0xFFn]" ;
+        const tokens = tokenize( source ) ;
+
+        const numbers = tokens.filter( ( t ) => t.type === TokenType.NUMBER ) ;
+        const bigints = tokens.filter( ( t ) => t.type === TokenType.BIGINT ) ;
+
+        expect( numbers.map( ( t ) => t.value ) ).toEqual(
+            [ "0" , "1.5" , ".5" , "1e10" , "0xFF" , "0o17" , "0b101" ]
+        ) ;
+        expect( bigints.map( ( t ) => t.value ) ).toEqual(
+            [ "42n" , "0xFFn" ]
+        ) ;
+    } ) ;
+
+    test( "string with mixed escapes" , () =>
+    {
+        const source = "\"a\\nb\\tc\\u0041d\\x41e\\u{1F600}f\"" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.STRING ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "keywords in an array context" , () =>
+    {
+        const source = "[null, undefined, true, false, NaN, Infinity]" ;
+        const tokens = tokenize( source ) ;
+
+        const keywords = tokens.filter( ( t ) => t.type === TokenType.KEYWORD ) ;
+        expect( keywords.map( ( t ) => t.value ) ).toEqual(
+            [ "null" , "undefined" , "true" , "false" , "NaN" , "Infinity" ]
+        ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — mixed position tracking" , () =>
+{
+    test( "LF, CR, CRLF, LS and PS all advance the line counter by 1" , () =>
+    {
+        const source = "a\nb\rc\r\nd\u2028e\u2029f" ;
+        const tokens = tokenize( source ) ;
+
+        const identifiers = tokens.filter( ( t ) => t.type === TokenType.IDENTIFIER ) ;
+        expect( identifiers.map( ( t ) => t.line ) ).toEqual( [ 1 , 2 , 3 , 4 , 5 , 6 ] ) ;
+        expect( identifiers.map( ( t ) => t.column ) ).toEqual( [ 1 , 1 , 1 , 1 , 1 , 1 ] ) ;
+    } ) ;
+
+    test( "astral identifier between identifiers and numbers advances offset correctly" , () =>
+    {
+        const source = "foo 𝓍 42" ;
+        const tokens = tokenize( source ) ;
+
+        expect( tokens[ 0 ].value ).toBe( "foo" ) ;
+        expect( tokens[ 1 ].type  ).toBe( TokenType.IDENTIFIER ) ;
+        expect( tokens[ 1 ].value ).toBe( "𝓍" ) ;
+        expect( tokens[ 2 ].type  ).toBe( TokenType.NUMBER ) ;
+        expect( tokens[ 2 ].value ).toBe( "42" ) ;
+        expect( tokens.at( -1 ).offset ).toBe( source.length ) ;
+    } ) ;
+
+    test( "block comment across CRLF keeps line and column in sync" , () =>
+    {
+        const source = "/* header\r\nbody */ foo" ;
+        const tokens = tokenize( source ) ;
+
+        const block = tokens[ 0 ] ;
+        const foo   = tokens[ 1 ] ;
+
+        expect( block.type  ).toBe( TokenType.BLOCK_COMMENT ) ;
+        expect( block.line  ).toBe( 1 ) ;
+        expect( foo.type    ).toBe( TokenType.IDENTIFIER ) ;
+        expect( foo.value   ).toBe( "foo" ) ;
+        expect( foo.line    ).toBe( 2 ) ;
+    } ) ;
+} ) ;
+
