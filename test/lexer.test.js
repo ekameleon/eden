@@ -410,3 +410,189 @@ describe( "lexer — block comments" , () =>
         expect( caught.column ).toBe( 3 ) ;
     } ) ;
 } ) ;
+
+describe( "lexer — identifiers" , () =>
+{
+    test.each(
+    [
+        "foo" ,
+        "_foo" ,
+        "$bar" ,
+        "foo123" ,
+        "_" ,
+        "$" ,
+        "Foo_bar$baz" ,
+        "a1b2c3"
+    ] )( "ASCII identifier %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.IDENTIFIER ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+        expect( tokens[ 1 ].column ).toBe( 1 + source.length ) ;
+    } ) ;
+
+    test( "BMP Unicode identifier (café)" , () =>
+    {
+        const tokens = tokenize( "café" ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.IDENTIFIER ) ;
+        expect( tokens[ 0 ].value  ).toBe( "café" ) ;
+        expect( tokens[ 1 ].offset ).toBe( 4 ) ;
+        expect( tokens[ 1 ].column ).toBe( 5 ) ;
+    } ) ;
+
+    test( "CJK identifier (数据)" , () =>
+    {
+        const tokens = tokenize( "数据" ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.IDENTIFIER ) ;
+        expect( tokens[ 0 ].value  ).toBe( "数据" ) ;
+        expect( tokens[ 1 ].offset ).toBe( 2 ) ;
+    } ) ;
+
+    test( "astral identifier (𝓍𝓎) outside the BMP" , () =>
+    {
+        const source = "𝓍𝓎" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.IDENTIFIER ) ;
+        expect( tokens[ 0 ].value  ).toBe( source ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+    } ) ;
+
+    test( "two identifiers separated by whitespace" , () =>
+    {
+        const tokens = tokenize( "foo bar" ) ;
+        expect( tokens ).toHaveLength( 3 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "foo" ) ;
+        expect( tokens[ 0 ].column ).toBe( 1 ) ;
+        expect( tokens[ 1 ].value  ).toBe( "bar" ) ;
+        expect( tokens[ 1 ].column ).toBe( 5 ) ;
+    } ) ;
+
+    test( "identifier followed by a punctuator with no whitespace" , () =>
+    {
+        const tokens = tokenize( "foo.bar" ) ;
+        expect( tokens.map( ( t ) => t.type ) ).toEqual(
+        [
+            TokenType.IDENTIFIER ,
+            TokenType.PUNCTUATOR ,
+            TokenType.IDENTIFIER ,
+            TokenType.EOF
+        ] ) ;
+        expect( tokens.map( ( t ) => t.value ) ).toEqual(
+            [ "foo" , "." , "bar" , "" ]
+        ) ;
+        expect( tokens.map( ( t ) => t.column ) ).toEqual(
+            [ 1 , 4 , 5 , 8 ]
+        ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — eden keywords" , () =>
+{
+    test.each(
+    [
+        "null"      ,
+        "true"      ,
+        "false"     ,
+        "undefined" ,
+        "NaN"       ,
+        "Infinity"
+    ] )( "value keyword %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.KEYWORD ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "operation keyword \"new\"" , () =>
+    {
+        const tokens = tokenize( "new" ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.KEYWORD ,
+            value:  "new" ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+    } ) ;
+
+    test( "identifiers that contain a keyword as a substring remain identifiers" , () =>
+    {
+        for ( const source of [ "newValue" , "classroom" , "trueish" , "undefinedLike" ] )
+        {
+            const tokens = tokenize( source ) ;
+            expect( tokens[ 0 ].type  ).toBe( TokenType.IDENTIFIER ) ;
+            expect( tokens[ 0 ].value ).toBe( source ) ;
+        }
+    } ) ;
+} ) ;
+
+describe( "lexer — ECMAScript reserved words" , () =>
+{
+    test.each(
+    [
+        "class"     , "function" , "return"   , "var"       ,
+        "let"       , "const"    , "yield"    , "await"     ,
+        "async"     , "import"   , "export"   , "if"        ,
+        "else"      , "for"      , "while"    , "do"        ,
+        "switch"    , "case"     , "break"    , "continue"  ,
+        "this"      , "super"    , "typeof"   , "instanceof",
+        "delete"    , "void"     , "throw"    , "try"       ,
+        "catch"     , "finally"  , "with"     , "debugger"  ,
+        "default"   , "in"       , "extends"  , "static"    ,
+        "enum"      , "implements", "interface", "package"  ,
+        "private"   , "protected", "public"
+    ] )( "reserved word %p is rejected at its start position" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "reserved word" ) ;
+        expect( caught.message ).toContain( `"${ source }"` ) ;
+        expect( caught.offset ).toBe( 0 ) ;
+        expect( caught.line   ).toBe( 1 ) ;
+        expect( caught.column ).toBe( 1 ) ;
+    } ) ;
+
+    test( "reserved word preceded by whitespace reports the correct position" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\n  class" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.offset ).toBe( 3 ) ;
+        expect( caught.line   ).toBe( 2 ) ;
+        expect( caught.column ).toBe( 3 ) ;
+    } ) ;
+} ) ;

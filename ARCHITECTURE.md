@@ -31,7 +31,11 @@ eden/
 │   │   ├── Lexer.js
 │   │   ├── createToken.js
 │   │   ├── tokenize.js
-│   │   └── TokenType.js
+│   │   ├── TokenType.js
+│   │   └── keywords/
+│   │       ├── edenValueKeywords.js
+│   │       ├── edenOperationKeywords.js
+│   │       └── ecmascriptReservedWords.js
 │   ├── parser/
 │   │   ├── Parser.js
 │   │   └── ast/
@@ -64,7 +68,8 @@ eden/
 │   │   ├── EdenSecurityError.js
 │   │   └── EdenTypeError.js
 │   └── util/
-│       └── unicode.js          ← ID_Start / ID_Continue helpers
+│       ├── isIdentifierStart.js   ← ID_Start helper
+│       └── isIdentifierPart.js    ← ID_Continue helper
 ├── test/
 │   ├── lexer.test.js
 │   ├── parser.test.js

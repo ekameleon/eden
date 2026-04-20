@@ -18,9 +18,14 @@
  * The only error class raised by the lexer is `EdenSyntaxError`.
  */
 
-import EdenSyntaxError from "../errors/EdenSyntaxError.js" ;
-import TokenType       from "./TokenType.js" ;
-import createToken     from "./createToken.js" ;
+import EdenSyntaxError          from "../errors/EdenSyntaxError.js" ;
+import isIdentifierStart        from "../util/isIdentifierStart.js" ;
+import isIdentifierPart         from "../util/isIdentifierPart.js" ;
+import TokenType                from "./TokenType.js" ;
+import createToken              from "./createToken.js" ;
+import edenValueKeywords        from "./keywords/edenValueKeywords.js" ;
+import edenOperationKeywords    from "./keywords/edenOperationKeywords.js" ;
+import ecmascriptReservedWords  from "./keywords/ecmascriptReservedWords.js" ;
 
 const LINE_FEED       = "\n" ;
 const CARRIAGE_RETURN = "\r" ;
@@ -111,6 +116,15 @@ export default class Lexer
             if ( this.#isPunctuatorStart( char ) )
             {
                 this.#readPunctuator( char ) ;
+                continue ;
+            }
+
+            const codePoint = this.#source.codePointAt( this.#offset ) ;
+            const startChar = String.fromCodePoint( codePoint ) ;
+
+            if ( isIdentifierStart( startChar ) )
+            {
+                this.#readIdentifier() ;
                 continue ;
             }
 
@@ -358,6 +372,84 @@ export default class Lexer
                 column: startColumn
             }
         ) ;
+    }
+
+    /**
+     * Reads an identifier-like lexeme starting at the current offset,
+     * classifies it, and pushes the resulting token.
+     *
+     * Classification per SPEC.md §2.6:
+     *   - eden value or operation keyword → `TokenType.KEYWORD`
+     *   - other ECMAScript reserved word → `EdenSyntaxError`
+     *     at the start position of the lexeme (forward-compat guard)
+     *   - anything else → `TokenType.IDENTIFIER`
+     *
+     * The reader is code-point aware: it advances by two code units
+     * when it encounters a character outside the BMP (surrogate pair).
+     */
+    #readIdentifier()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let end = this.#offset ;
+
+        const startCp   = this.#source.codePointAt( end ) ;
+        const startChar = String.fromCodePoint( startCp ) ;
+        end += startChar.length ;
+
+        while ( end < this.#length )
+        {
+            const cp  = this.#source.codePointAt( end ) ;
+            const chr = String.fromCodePoint( cp ) ;
+
+            if ( !isIdentifierPart( chr ) )
+            {
+                break ;
+            }
+
+            end += chr.length ;
+        }
+
+        const value    = this.#source.slice( startOffset , end ) ;
+        const advanced = end - startOffset ;
+
+        this.#offset  = end ;
+        this.#column += advanced ;
+
+        if ( edenValueKeywords.has( value ) || edenOperationKeywords.has( value ) )
+        {
+            this.#tokens.push( createToken(
+                TokenType.KEYWORD ,
+                value ,
+                startOffset ,
+                startLine ,
+                startColumn
+            ) ) ;
+            return ;
+        }
+
+        if ( ecmascriptReservedWords.has( value ) )
+        {
+            throw new EdenSyntaxError(
+                `Reserved word "${ value }" cannot be used as an identifier.` ,
+                {
+                    source: this.#source ,
+                    offset: startOffset ,
+                    line:   startLine ,
+                    column: startColumn
+                }
+            ) ;
+        }
+
+        this.#tokens.push( createToken(
+            TokenType.IDENTIFIER ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
     }
 
     /**
