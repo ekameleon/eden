@@ -15,6 +15,7 @@ the *implementation*.
 eden/
 ├── CLAUDE.md                   ← rules for Claude Code sessions
 ├── SPEC.md                     ← normative grammar and semantics
+├── eden.abnf                   ← machine-readable companion grammar
 ├── ARCHITECTURE.md             ← this file
 ├── README.md
 ├── LICENSE

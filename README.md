@@ -148,7 +148,9 @@ so please keep them minimal, focused on one feature each, and stable.
 
 ## Grammar
 
-See [`SPEC.md`](./SPEC.md) for the normative grammar and semantics.
+- [`SPEC.md`](./SPEC.md) — normative grammar and semantics (prose form)
+- [`eden.abnf`](./eden.abnf) — machine-readable companion grammar
+  (ABNF, RFC 5234 + RFC 7405)
 
 ## File association
 

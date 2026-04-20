@@ -1,0 +1,351 @@
+;; =============================================================
+;; eden — ECMAScript Data Exchange Notation
+;; Grammar (machine-readable companion to SPEC.md)
+;; =============================================================
+;;
+;; Specification version: 1.0
+;; Updated:               2026-04-20
+;;
+;; Notation
+;;   ABNF per RFC 5234, plus:
+;;     - the %s"..." case-sensitive string extension (RFC 7405),
+;;       used for every eden keyword;
+;;     - the prose-val form "<description>" (RFC 5234 §4) for
+;;       abstract productions that refer to Unicode character
+;;       classes or to "any source character".
+;;   Validators must support these two features. Note that the
+;;   popular BAP tool only emits RFC 7405 warnings; they are
+;;   expected and harmless.
+;;
+;; Authority
+;;   SPEC.md is the normative specification. This file is the
+;;   machine-readable counterpart. If the two disagree, SPEC.md
+;;   wins and this file is the defect.
+;;
+;; Entry points
+;;   data-program   — surface consumed by eden.parse  (SPEC §3.1)
+;;   eval-program   — surface consumed by eden.evaluate
+;;                    (SPEC §3.2 and §3.3)
+;;
+;; Conventions
+;;   - Unicode character classes (ID_Start, ID_Continue, Zs)
+;;     are declared as abstract rules and resolved by reference
+;;     to UAX #31. See the "Abstract Unicode classes" section.
+;;   - "Exclusion" character classes (source-char minus some set)
+;;     are likewise abstract; their name spells out the excluded
+;;     characters.
+;;   - Numeric literal separators, reserved-word rejection, and
+;;     legacy-octal rejection are SPEC-level constraints beyond
+;;     the grammatical surface expressed here.
+;;
+;; Licensing: MPL 2.0, same as the rest of the eden project.
+;;
+;; =============================================================
+
+
+;; =============================================================
+;; Entry points
+;; =============================================================
+
+data-program       = value
+eval-program       = *statement
+
+
+;; =============================================================
+;; Syntactic grammar — SPEC §3
+;; =============================================================
+
+; --- 3.1 Data-mode value -------------------------------------
+
+value              = null-literal
+                   / bool-literal
+                   / undefined-literal
+                   / numeric-literal
+                   / bigint-literal
+                   / string-literal
+                   / template-literal
+                   / array
+                   / object
+                   / unary-value
+
+unary-value        = ( "+" / "-" ) ( numeric-literal / bigint-literal )
+
+; --- 3.2-3.3 Eval-mode statements and expressions ------------
+
+statement          = ( assignment / expression ) [ ";" ]
+assignment         = member-path "=" expression
+
+expression         = literal
+                   / array
+                   / object
+                   / new-expression
+                   / call-expression
+                   / member-path
+                   / unary-expression
+
+literal            = null-literal
+                   / bool-literal
+                   / undefined-literal
+                   / numeric-literal
+                   / bigint-literal
+                   / string-literal
+                   / template-literal
+
+unary-expression   = ( "+" / "-" ) expression
+
+new-expression     = %s"new" required-ws member-path [ arguments ]
+call-expression    = member-path arguments
+
+arguments          = "(" [ expression *( "," expression ) [ "," ] ] ")"
+
+member-path        = identifier *member-access
+member-access      = "." identifier
+                   / "[" ( string-literal / numeric-literal ) "]"
+
+; --- 3.4 Arrays ----------------------------------------------
+
+array              = "[" [ element *( "," element ) [ "," ] ] "]"
+
+; NOTE: an element is a value in data mode and an expression in
+;       eval mode. The grammar surface is identical in shape;
+;       the mode is chosen by the caller.
+element            = value            ; data mode
+                   / expression       ; eval mode
+
+; --- 3.5 Objects ---------------------------------------------
+
+object             = "{" [ property *( "," property ) [ "," ] ] "}"
+
+property           = long-form-property               ; data / eval
+                   / shorthand-property               ; eval only
+                   / computed-property                ; eval only
+
+long-form-property = property-key ":" value          ; data mode
+                   / property-key ":" expression     ; eval mode
+shorthand-property = identifier
+computed-property  = "[" expression "]" ":" expression
+
+property-key       = identifier / string-literal / numeric-literal
+
+
+;; =============================================================
+;; Lexical grammar — SPEC §2
+;; =============================================================
+
+; --- 2.2 Whitespace ------------------------------------------
+
+ws                 = %x09                            ; HT
+                   / %x0B                            ; VT
+                   / %x0C                            ; FF
+                   / %x20                            ; SP
+                   / <U+00A0 NO-BREAK SPACE>
+                   / <U+FEFF ZERO WIDTH NO-BREAK SPACE>
+                   / unicode-space-separator
+
+required-ws        = 1*ws                            ; helper
+
+; --- 2.3 Line terminators ------------------------------------
+
+line-terminator    = %x0A                            ; LF
+                   / %x0D                            ; CR
+                   / <U+2028 LINE SEPARATOR>
+                   / <U+2029 PARAGRAPH SEPARATOR>
+
+; Canonical single terminator: CRLF is treated as one.
+line-terminator-seq = %x0D %x0A / line-terminator
+
+; --- 2.4 Comments --------------------------------------------
+
+comment            = line-comment / block-comment
+line-comment       = "//" *source-char-no-lt
+block-comment      = "/*" *source-char-no-block-close "*/"
+
+; --- 2.5 Punctuators -----------------------------------------
+
+punctuator         = "{" / "}" / "[" / "]" / "(" / ")"
+                   / "," / ":" / ";" / "."
+                   / "..." / "=" / "+" / "-"
+
+; --- 2.6 Reserved words --------------------------------------
+
+value-keyword      = %s"null"
+                   / %s"true"
+                   / %s"false"
+                   / %s"undefined"
+                   / %s"NaN"
+                   / %s"Infinity"
+
+operation-keyword  = %s"new"
+
+; ECMAScript reserved words rejected as identifiers is a
+; lexical-level constraint enforced by the implementation; see
+; SPEC §2.6. The rejection set is not expressed in this grammar.
+
+; --- 2.7 Identifiers -----------------------------------------
+
+identifier         = identifier-start *identifier-part
+identifier-start   = "_" / "$" / unicode-id-start
+identifier-part    = identifier-start
+                   / unicode-id-continue
+
+; --- 2.8 Numeric literals ------------------------------------
+
+numeric-literal    = decimal-literal
+                   / hex-literal
+                   / octal-literal
+                   / binary-literal
+
+bigint-literal     = ( decimal-int
+                     / hex-literal
+                     / octal-literal
+                     / binary-literal ) %s"n"
+
+decimal-literal    = decimal-int [ "." decimal-digits ] [ exponent-part ]
+                   / "." decimal-digits [ exponent-part ]
+
+decimal-int        = "0" / non-zero-digit *( decimal-digit / "_" decimal-digit )
+decimal-digits     = decimal-digit *( decimal-digit / "_" decimal-digit )
+
+exponent-part      = ( "e" / "E" ) [ "+" / "-" ] decimal-digits
+
+hex-literal        = "0" ( "x" / "X" ) hex-digit *( hex-digit / "_" hex-digit )
+octal-literal      = "0" ( "o" / "O" ) octal-digit *( octal-digit / "_" octal-digit )
+binary-literal     = "0" ( "b" / "B" ) binary-digit *( binary-digit / "_" binary-digit )
+
+decimal-digit      = %x30-39
+non-zero-digit     = %x31-39
+octal-digit        = %x30-37
+binary-digit       = "0" / "1"
+hex-digit          = decimal-digit / %x41-46 / %x61-66
+
+; --- 2.9 String literals -------------------------------------
+
+string-literal     = %x22 *double-string-char %x22          ; "..."
+                   / %x27 *single-string-char %x27          ; '...'
+
+double-string-char = source-char-no-dq-bs-lt
+                   / line-continuation
+                   / escape-sequence
+single-string-char = source-char-no-sq-bs-lt
+                   / line-continuation
+                   / escape-sequence
+
+line-continuation  = %x5C line-terminator-seq               ; \ + LT
+
+escape-sequence    = %x5C ( single-escape
+                          / unicode-escape
+                          / hex-escape )
+
+single-escape      = %x22                                   ; "
+                   / "'"
+                   / "`"
+                   / %x5C                                   ; \
+                   / %s"b" / %s"f" / %s"n"
+                   / %s"r" / %s"t" / %s"v"
+                   / %s"0"
+
+unicode-escape     = %s"u" 4hex-digit
+                   / %s"u" "{" 1*6hex-digit "}"
+                   ; The braced form encodes a Unicode scalar
+                   ; value in the range U+0000..U+10FFFF. Values
+                   ; above U+10FFFF are rejected by the lexer.
+
+hex-escape         = %s"x" 2hex-digit
+
+; --- 2.10 Template literals ----------------------------------
+
+template-literal   = %x60 *template-char %x60              ; `...`
+template-char      = source-char-no-bt-bs
+                   / escape-sequence
+                   / line-terminator-seq
+                   ; "${" is NOT rejected; the sequence is
+                   ; preserved verbatim as ordinary characters.
+
+
+;; =============================================================
+;; Abstract Unicode classes
+;; =============================================================
+;; The three rules below are declared abstractly. Their
+;; concrete definitions are delegated to Unicode. Implementations
+;; SHOULD resolve them using the regex escapes \p{ID_Start},
+;; \p{ID_Continue}, and \p{Space_Separator} on runtimes that
+;; support Unicode property classes, or via precomputed tables
+;; derived from the Unicode Character Database.
+;;
+;;   unicode-id-start        — any scalar value in the ID_Start
+;;                             property (UAX #31), excluding the
+;;                             characters "_" and "$" which appear
+;;                             explicitly in identifier-start.
+;;   unicode-id-continue     — any scalar value in ID_Continue
+;;                             (UAX #31).
+;;   unicode-space-separator — any scalar value in the Unicode
+;;                             General Category "Zs".
+;; =============================================================
+
+unicode-id-start        = <any Unicode scalar value in UAX #31 ID_Start>
+unicode-id-continue     = <any Unicode scalar value in UAX #31 ID_Continue>
+unicode-space-separator = <any Unicode scalar value in General Category Zs>
+
+
+;; =============================================================
+;; Helper character classes
+;; =============================================================
+;; "source-char" is any Unicode scalar value. Exclusion classes
+;; carry their excluded characters in their name. They are kept
+;; abstract because enumerating the complement of a Unicode scalar
+;; range is not expressible in stock ABNF.
+;; =============================================================
+
+source-char                 = <any Unicode scalar value>
+source-char-no-lt           = <any source-char except line-terminator>
+source-char-no-block-close  = <any source-char; closure of block-comment is resolved by the trailing "*/" literal in block-comment>
+source-char-no-dq-bs-lt     = <any source-char except %x22 "\"" , %x5C "\\" , or line-terminator>
+source-char-no-sq-bs-lt     = <any source-char except %x27 "'"  , %x5C "\\" , or line-terminator>
+source-char-no-bt-bs        = <any source-char except %x60 "`"  , or %x5C "\\">
+
+
+
+;; =============================================================
+;; Notes
+;; =============================================================
+;;
+;; 1. Numeric separator "_"
+;;    The grammar accepts "_" strictly between two digits of the
+;;    same class. A lexer MUST reject "_" at the start of a digit
+;;    run, at the end, doubled, or adjacent to "." or to a base
+;;    prefix ("0x_", "1_.5", "1_", "1__0"). This constraint
+;;    is naturally expressed by the rules decimal-digits,
+;;    hex-literal, octal-literal, and binary-literal above.
+;;
+;; 2. Reserved-word rejection (SPEC §2.6)
+;;    identifiers lexically equal to any ECMAScript 2022 reserved
+;;    word that is not a value-keyword or operation-keyword MUST
+;;    be rejected with EdenSyntaxError. This is a lexical check,
+;;    not a grammatical one.
+;;
+;; 3. Legacy octals (SPEC §2.8)
+;;    A decimal-int starting with "0" followed by another decimal
+;;    digit (e.g. "0777") MUST be rejected with EdenSyntaxError.
+;;    The grammar above admits no such production, so conformance
+;;    is enforced by implementation-level look-ahead.
+;;
+;; 4. Templates never interpolate (SPEC §2.10)
+;;    The sequence "${...}" inside a template-literal is preserved
+;;    verbatim. eden does not evaluate it. Downstream consumers
+;;    (Mustache, lodash, shell templating, prompt renderers, ...)
+;;    may treat it as a placeholder for their own engines.
+;;
+;; 5. Line terminators
+;;    - In string-literal: bare line terminators are forbidden;
+;;      only line-continuation ( "\" + line-terminator-seq ) is
+;;      allowed.
+;;    - In template-literal: bare line terminators are allowed
+;;      and preserved in the lexeme verbatim.
+;;
+;; 6. Data mode vs eval mode
+;;    The syntactic grammar is parameterised: in data mode,
+;;    arrays and objects hold "value"; in eval mode they hold
+;;    "expression". Shorthand and computed object properties are
+;;    valid only in eval mode (SPEC §3.5).
+;;
+;; =============================================================

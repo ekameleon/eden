@@ -15,6 +15,11 @@ This document defines the grammar and semantics normatively.
 The JavaScript implementation in this repository and the future PHP port
 both conform to this specification.
 
+A machine-readable companion grammar is published at
+[`eden.abnf`](./eden.abnf). It restates the structural grammar of this
+document in ABNF (RFC 5234 + RFC 7405). If the two ever disagree,
+`SPEC.md` wins and `eden.abnf` is the defect.
+
 ---
 
 ## 1. Two modes
