@@ -29,7 +29,8 @@ eden/
 │   ├── index.js                ← public façade (parse, stringify, evaluate, ...)
 │   ├── lexer/
 │   │   ├── Lexer.js
-│   │   ├── Token.js
+│   │   ├── createToken.js
+│   │   ├── tokenize.js
 │   │   └── TokenType.js
 │   ├── parser/
 │   │   ├── Parser.js
