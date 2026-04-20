@@ -1263,3 +1263,143 @@ describe( "lexer — string error cases" , () =>
     } ) ;
 } ) ;
 
+describe( "lexer — template literals" , () =>
+{
+    test.each(
+    [
+        "``"                ,
+        "`foo`"             ,
+        "`  spaces  `"      ,
+        "`with 'quotes' inside`" ,
+        "`with \"quotes\" inside`"
+    ] )( "single-line template %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.TEMPLATE ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "multi-line template preserves line terminators verbatim" , () =>
+    {
+        const source = "`line 1\nline 2\nline 3`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.TEMPLATE ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 3 ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+    } ) ;
+
+    test( "CRLF inside a template counts as a single line terminator" , () =>
+    {
+        const source = "`a\r\nb`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 2 ) ;
+    } ) ;
+
+    test.each(
+    [
+        "`\\n`"         ,
+        "`\\u{1F600}`"  ,
+        "`\\x41`"       ,
+        "`\\``"         ,
+        "`\\\\`"
+    ] )( "template with escape %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.TEMPLATE ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "template preserves ${...} sequences verbatim (no interpolation)" , () =>
+    {
+        const source = "`Hello ${name}, age ${age}`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.TEMPLATE ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "template preserves $ as an ordinary character" , () =>
+    {
+        const source = "`price: $100`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "multi-line template with ${...} placeholders" , () =>
+    {
+        const source = "`SELECT *\nFROM users\nWHERE id = ${userId}`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.TEMPLATE ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 3 ) ;
+    } ) ;
+
+    test( "line continuation inside a template" , () =>
+    {
+        const source = "`abc\\\ndef`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.TEMPLATE ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 2 ) ;
+    } ) ;
+
+    test( "two adjacent templates" , () =>
+    {
+        const tokens = tokenize( "`a``b`" ) ;
+        expect( tokens.map( ( t ) => t.value ) ).toEqual(
+            [ "`a`" , "`b`" , "" ]
+        ) ;
+    } ) ;
+
+    test( "template Unicode content preserved" , () =>
+    {
+        const source = "`café 😀 数据`" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "unterminated template points to the opening backtick" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "  `foo bar" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated template literal" ) ;
+        expect( caught.offset ).toBe( 2 ) ;
+        expect( caught.line   ).toBe( 1 ) ;
+        expect( caught.column ).toBe( 3 ) ;
+    } ) ;
+
+    test( "invalid escape inside template is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "`\\q`" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "invalid escape sequence" ) ;
+    } ) ;
+} ) ;
+

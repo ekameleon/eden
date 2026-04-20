@@ -155,7 +155,7 @@ SingleStringChar    ::= SourceChar - ("'" | "\" | LineTerminator)
 
 LineContinuation    ::= "\" LineTerminator
 EscapeSequence      ::= "\" ( SingleEscape | UnicodeEscape | HexEscape )
-SingleEscape        ::= "'" | '"' | "\" | "b" | "f" | "n" | "r" | "t" | "v" | "0"
+SingleEscape        ::= "'" | '"' | "`" | "\" | "b" | "f" | "n" | "r" | "t" | "v" | "0"
 UnicodeEscape       ::= "u" HexDigit HexDigit HexDigit HexDigit
                       | "u{" HexDigit { HexDigit } "}"
 HexEscape           ::= "x" HexDigit HexDigit
@@ -165,16 +165,19 @@ HexEscape           ::= "x" HexDigit HexDigit
 
 ```
 TemplateLiteral ::= "`" { TemplateChar } "`"
-TemplateChar    ::= SourceChar - ("`" | "\" | "${")
+TemplateChar    ::= SourceChar - ("`" | "\")
                   | EscapeSequence
-                  | "$" (not followed by "{")
 ```
 
-Template literals behave as multi-line strings. **Interpolation (`${expr}`)
-is reserved and raises `EdenSyntaxError`** with a clear message. eden is
-not a JavaScript engine.
+Template literals behave as multi-line strings. Literal line terminators
+inside a template are preserved verbatim.
 
-Literal line terminators inside a template are preserved verbatim.
+**Templates never interpolate.** The sequence `${...}` is preserved
+verbatim as part of the string content. eden is a data-interchange
+format, not a runtime — `${...}` is a passthrough payload that
+downstream consumers (Mustache, lodash, Handlebars, shell templating,
+prompt renderers, ...) may interpret with their own rules, but eden
+itself never evaluates it.
 
 ---
 

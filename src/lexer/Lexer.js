@@ -112,6 +112,12 @@ export default class Lexer
                 continue ;
             }
 
+            if ( char === "`" )
+            {
+                this.#readTemplate() ;
+                continue ;
+            }
+
             if ( this.#isDecimalDigit( char ) )
             {
                 this.#readNumber() ;
@@ -475,6 +481,7 @@ export default class Lexer
         {
             case "\"" :
             case "'"  :
+            case "`"  :
             case "\\" :
             case "b"  :
             case "f"  :
@@ -1117,6 +1124,78 @@ export default class Lexer
 
         throw new EdenSyntaxError(
             "Unterminated string literal." ,
+            {
+                source: this.#source ,
+                offset: startOffset ,
+                line:   startLine ,
+                column: startColumn
+            }
+        ) ;
+    }
+
+    /**
+     * Reads a template literal (backtick-delimited) starting at the
+     * current offset and pushes a `TokenType.TEMPLATE` token holding
+     * the raw lexeme. Templates behave as multi-line strings: line
+     * terminators are preserved verbatim in the token value.
+     *
+     * Escape sequences are validated via `#readEscapeSequence()`,
+     * reusing the exact same rules as string literals.
+     *
+     * Templates **do not interpolate**. The sequence `${...}` is
+     * preserved verbatim — `$` is an ordinary character.
+     *
+     * Raises `EdenSyntaxError("Unterminated template literal.")` at
+     * the position of the opening backtick if EOF is reached before
+     * the closing backtick.
+     */
+    #readTemplate()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        this.#offset += 1 ;
+        this.#column += 1 ;
+
+        while ( this.#offset < this.#length )
+        {
+            const ch = this.#source[ this.#offset ] ;
+
+            if ( ch === "`" )
+            {
+                this.#offset += 1 ;
+                this.#column += 1 ;
+
+                const value = this.#source.slice( startOffset , this.#offset ) ;
+                this.#tokens.push( createToken(
+                    TokenType.TEMPLATE ,
+                    value ,
+                    startOffset ,
+                    startLine ,
+                    startColumn
+                ) ) ;
+                return ;
+            }
+
+            if ( this.#isLineTerminator( ch ) )
+            {
+                this.#consumeLineTerminator( ch ) ;
+                continue ;
+            }
+
+            if ( ch === "\\" )
+            {
+                this.#readEscapeSequence() ;
+                continue ;
+            }
+
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        throw new EdenSyntaxError(
+            "Unterminated template literal." ,
             {
                 source: this.#source ,
                 offset: startOffset ,

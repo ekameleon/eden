@@ -10,6 +10,7 @@ dédiée à **l'utilisation** d'eden depuis du code consommateur.
 ## Chapitres
 
 - [Premiers pas](./getting-started.md)
+- [Chaînes et templates](./strings-and-templates.md)
 - Mode données — `parse` / `stringify` *(à venir)*
 - Mode évaluation — `evaluate`, scope et politique de sécurité *(à venir)*
 - Interop JSON — `fromJSON` / `toJSON` *(à venir)*

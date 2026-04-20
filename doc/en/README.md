@@ -9,6 +9,7 @@ focuses on **how to use** eden from consuming code.
 ## Chapters
 
 - [Getting started](./getting-started.md)
+- [Strings and templates](./strings-and-templates.md)
 - Data mode — `parse` / `stringify` *(coming soon)*
 - Evaluation mode — `evaluate`, scope and security policy *(coming soon)*
 - JSON interop — `fromJSON` / `toJSON` *(coming soon)*
