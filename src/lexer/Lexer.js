@@ -106,6 +106,12 @@ export default class Lexer
                 this.#unexpected( char ) ;
             }
 
+            if ( char === "\"" || char === "'" )
+            {
+                this.#readString( char ) ;
+                continue ;
+            }
+
             if ( this.#isDecimalDigit( char ) )
             {
                 this.#readNumber() ;
@@ -412,6 +418,248 @@ export default class Lexer
 
             break ;
         }
+    }
+
+    /**
+     * Validates and consumes a single `\...` escape sequence at the
+     * current offset inside a string literal. The lexer only
+     * validates the syntactic shape; the value interpretation is
+     * performed later by the parser from the raw lexeme.
+     *
+     * Recognized shapes (SPEC.md §2.9):
+     *   - single-character escapes `\'`, `\"`, `\\`, `\b`, `\f`,
+     *     `\n`, `\r`, `\t`, `\v`, `\0` (only when not followed by
+     *     a decimal digit)
+     *   - hex escape `\xHH` (exactly two hex digits)
+     *   - unicode 4-digit escape `\uHHHH`
+     *   - unicode braced escape `\u{H…H}` (1..6 hex digits, value
+     *     must not exceed U+10FFFF)
+     *   - line continuation: `\` immediately followed by LF, CR,
+     *     CRLF, LS, or PS — consumed and position counters updated
+     *
+     * Legacy octal escapes (e.g. `\12`) are rejected.
+     *
+     * @throws {EdenSyntaxError}
+     */
+    #readEscapeSequence()
+    {
+        const escOffset = this.#offset ;
+        const escLine   = this.#line ;
+        const escColumn = this.#column ;
+
+        this.#offset += 1 ;
+        this.#column += 1 ;
+
+        if ( this.#offset >= this.#length )
+        {
+            throw new EdenSyntaxError(
+                "Unterminated escape sequence." ,
+                {
+                    source: this.#source ,
+                    offset: escOffset ,
+                    line:   escLine ,
+                    column: escColumn
+                }
+            ) ;
+        }
+
+        const next = this.#source[ this.#offset ] ;
+
+        if ( this.#isLineTerminator( next ) )
+        {
+            this.#consumeLineTerminator( next ) ;
+            return ;
+        }
+
+        switch ( next )
+        {
+            case "\"" :
+            case "'"  :
+            case "\\" :
+            case "b"  :
+            case "f"  :
+            case "n"  :
+            case "r"  :
+            case "t"  :
+            case "v"  :
+                this.#offset += 1 ;
+                this.#column += 1 ;
+                return ;
+        }
+
+        if ( next === "0" )
+        {
+            const after = this.#source[ this.#offset + 1 ] ;
+            if ( after !== undefined && this.#isDecimalDigit( after ) )
+            {
+                throw new EdenSyntaxError(
+                    "Octal escape sequences are not allowed." ,
+                    {
+                        source: this.#source ,
+                        offset: escOffset ,
+                        line:   escLine ,
+                        column: escColumn
+                    }
+                ) ;
+            }
+            this.#offset += 1 ;
+            this.#column += 1 ;
+            return ;
+        }
+
+        if ( next === "x" )
+        {
+            this.#offset += 1 ;
+            this.#column += 1 ;
+            for ( let i = 0 ; i < 2 ; i += 1 )
+            {
+                const ch = this.#source[ this.#offset ] ;
+                if ( ch === undefined || !this.#isHexDigit( ch ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Invalid hex escape sequence." ,
+                        {
+                            source: this.#source ,
+                            offset: escOffset ,
+                            line:   escLine ,
+                            column: escColumn
+                        }
+                    ) ;
+                }
+                this.#offset += 1 ;
+                this.#column += 1 ;
+            }
+            return ;
+        }
+
+        if ( next === "u" )
+        {
+            this.#offset += 1 ;
+            this.#column += 1 ;
+
+            const afterU = this.#source[ this.#offset ] ;
+
+            if ( afterU === "{" )
+            {
+                this.#offset += 1 ;
+                this.#column += 1 ;
+
+                let hexDigits = "" ;
+                while ( this.#offset < this.#length )
+                {
+                    const ch = this.#source[ this.#offset ] ;
+
+                    if ( ch === "}" )
+                    {
+                        break ;
+                    }
+
+                    if ( ch === "\"" || ch === "'" || this.#isLineTerminator( ch ) )
+                    {
+                        throw new EdenSyntaxError(
+                            "Unterminated unicode escape sequence." ,
+                            {
+                                source: this.#source ,
+                                offset: escOffset ,
+                                line:   escLine ,
+                                column: escColumn
+                            }
+                        ) ;
+                    }
+
+                    if ( !this.#isHexDigit( ch ) )
+                    {
+                        throw new EdenSyntaxError(
+                            "Invalid unicode escape sequence." ,
+                            {
+                                source: this.#source ,
+                                offset: escOffset ,
+                                line:   escLine ,
+                                column: escColumn
+                            }
+                        ) ;
+                    }
+
+                    hexDigits += ch ;
+                    this.#offset += 1 ;
+                    this.#column += 1 ;
+                }
+
+                if ( this.#source[ this.#offset ] !== "}" )
+                {
+                    throw new EdenSyntaxError(
+                        "Unterminated unicode escape sequence." ,
+                        {
+                            source: this.#source ,
+                            offset: escOffset ,
+                            line:   escLine ,
+                            column: escColumn
+                        }
+                    ) ;
+                }
+
+                if ( hexDigits.length === 0 )
+                {
+                    throw new EdenSyntaxError(
+                        "Unicode escape sequence cannot be empty." ,
+                        {
+                            source: this.#source ,
+                            offset: escOffset ,
+                            line:   escLine ,
+                            column: escColumn
+                        }
+                    ) ;
+                }
+
+                const codePoint = parseInt( hexDigits , 16 ) ;
+                if ( codePoint > 0x10FFFF )
+                {
+                    throw new EdenSyntaxError(
+                        "Unicode codepoint out of range." ,
+                        {
+                            source: this.#source ,
+                            offset: escOffset ,
+                            line:   escLine ,
+                            column: escColumn
+                        }
+                    ) ;
+                }
+
+                this.#offset += 1 ;
+                this.#column += 1 ;
+                return ;
+            }
+
+            for ( let i = 0 ; i < 4 ; i += 1 )
+            {
+                const ch = this.#source[ this.#offset ] ;
+                if ( ch === undefined || !this.#isHexDigit( ch ) )
+                {
+                    throw new EdenSyntaxError(
+                        "Invalid unicode escape sequence." ,
+                        {
+                            source: this.#source ,
+                            offset: escOffset ,
+                            line:   escLine ,
+                            column: escColumn
+                        }
+                    ) ;
+                }
+                this.#offset += 1 ;
+                this.#column += 1 ;
+            }
+            return ;
+        }
+
+        throw new EdenSyntaxError(
+            `Invalid escape sequence "\\${ next }".` ,
+            {
+                source: this.#source ,
+                offset: escOffset ,
+                line:   escLine ,
+                column: escColumn
+            }
+        ) ;
     }
 
     /**
@@ -795,6 +1043,87 @@ export default class Lexer
             startLine ,
             startColumn
         ) ) ;
+    }
+
+    /**
+     * Reads a string literal starting at the current offset and
+     * pushes a `TokenType.STRING` token holding the **raw** lexeme
+     * (including the enclosing quotes and the unresolved escape
+     * sequences). Escape validation happens via
+     * `#readEscapeSequence()`; value interpretation is the parser's
+     * responsibility.
+     *
+     * Raises:
+     *   - `EdenSyntaxError("Unterminated string literal.")` at the
+     *     position of the opening quote on EOF before closure;
+     *   - `EdenSyntaxError("String literals cannot contain line
+     *     terminators.")` at the position of a bare line terminator
+     *     inside the body (line continuations via `\LT` are handled
+     *     by `#readEscapeSequence()`).
+     *
+     * @param {"\"" | "'"} quote - The opening quote character.
+     */
+    #readString( quote )
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        this.#offset += 1 ;
+        this.#column += 1 ;
+
+        while ( this.#offset < this.#length )
+        {
+            const ch = this.#source[ this.#offset ] ;
+
+            if ( ch === quote )
+            {
+                this.#offset += 1 ;
+                this.#column += 1 ;
+
+                const value = this.#source.slice( startOffset , this.#offset ) ;
+                this.#tokens.push( createToken(
+                    TokenType.STRING ,
+                    value ,
+                    startOffset ,
+                    startLine ,
+                    startColumn
+                ) ) ;
+                return ;
+            }
+
+            if ( this.#isLineTerminator( ch ) )
+            {
+                throw new EdenSyntaxError(
+                    "String literals cannot contain line terminators." ,
+                    {
+                        source: this.#source ,
+                        offset: this.#offset ,
+                        line:   this.#line ,
+                        column: this.#column
+                    }
+                ) ;
+            }
+
+            if ( ch === "\\" )
+            {
+                this.#readEscapeSequence() ;
+                continue ;
+            }
+
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        throw new EdenSyntaxError(
+            "Unterminated string literal." ,
+            {
+                source: this.#source ,
+                offset: startOffset ,
+                line:   startLine ,
+                column: startColumn
+            }
+        ) ;
     }
 
     /**

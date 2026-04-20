@@ -1,0 +1,7 @@
+{
+    "class":   "EdenSyntaxError",
+    "message": "cannot contain line terminators",
+    "line":    1,
+    "column":  5,
+    "offset":  4
+}

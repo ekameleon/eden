@@ -1,0 +1,7 @@
+{
+    "class":   "EdenSyntaxError",
+    "message": "invalid escape sequence",
+    "line":    1,
+    "column":  2,
+    "offset":  1
+}

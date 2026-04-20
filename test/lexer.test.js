@@ -929,3 +929,337 @@ describe( "lexer — numbers adjacent to other tokens" , () =>
         expect( tokens[ 1 ].column ).toBe( 7 ) ;
     } ) ;
 } ) ;
+
+describe( "lexer — strings (basics)" , () =>
+{
+    test.each(
+    [
+        "\"\""         ,
+        "''"           ,
+        "\"foo\""      ,
+        "'foo'"        ,
+        "\" spaces \"" ,
+        "'with : colon ; punct , chars'"
+    ] )( "simple string %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.STRING ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+    } ) ;
+
+    test( "double-quoted string can contain single quote" , () =>
+    {
+        const tokens = tokenize( "\"it's fine\"" ) ;
+        expect( tokens[ 0 ].value ).toBe( "\"it's fine\"" ) ;
+    } ) ;
+
+    test( "single-quoted string can contain double quote" , () =>
+    {
+        const tokens = tokenize( "'say \"hi\"'" ) ;
+        expect( tokens[ 0 ].value ).toBe( "'say \"hi\"'" ) ;
+    } ) ;
+
+    test( "string followed by a punctuator" , () =>
+    {
+        const tokens = tokenize( "\"foo\"," ) ;
+        expect( tokens.map( ( t ) => t.type ) ).toEqual(
+        [
+            TokenType.STRING ,
+            TokenType.PUNCTUATOR ,
+            TokenType.EOF
+        ] ) ;
+        expect( tokens[ 0 ].value ).toBe( "\"foo\"" ) ;
+        expect( tokens[ 1 ].value ).toBe( "," ) ;
+    } ) ;
+
+    test( "two adjacent strings separated by whitespace" , () =>
+    {
+        const tokens = tokenize( "\"a\" 'b'" ) ;
+        expect( tokens.map( ( t ) => t.value ) ).toEqual(
+            [ "\"a\"" , "'b'" , "" ]
+        ) ;
+    } ) ;
+
+    test( "Unicode content is preserved verbatim" , () =>
+    {
+        const source = "\"café — 数据 🐱\"" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.STRING ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — string escape sequences" , () =>
+{
+    test.each(
+    [
+        [ "\"\\\"\""  , "double-quote escape"    ] ,
+        [ "'\\''"     , "single-quote escape"    ] ,
+        [ "\"\\\\\""  , "backslash escape"       ] ,
+        [ "\"\\b\""   , "backspace"              ] ,
+        [ "\"\\f\""   , "form feed"              ] ,
+        [ "\"\\n\""   , "line feed"              ] ,
+        [ "\"\\r\""   , "carriage return"        ] ,
+        [ "\"\\t\""   , "tab"                    ] ,
+        [ "\"\\v\""   , "vertical tab"           ] ,
+        [ "\"\\0\""   , "null"                   ]
+    ] )( "single-char escape %p (%s)" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.STRING ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\x41\"" ,
+        "\"\\xff\"" ,
+        "\"\\xAB\""
+    ] )( "hex escape %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\u00E9\"" ,
+        "\"\\u2028\"" ,
+        "\"\\u0041\""
+    ] )( "unicode 4-digit escape %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\u{41}\""     ,
+        "\"\\u{1F600}\""  ,
+        "\"\\u{10FFFF}\"" ,
+        "\"\\u{0}\""
+    ] )( "unicode braced escape %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "mixed escapes in one string" , () =>
+    {
+        const source = "\"a\\nb\\tc\\u0041d\\x41e\"" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+    } ) ;
+
+    test( "line continuation via backslash + LF" , () =>
+    {
+        const source = "\"abc\\\ndef\"" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].type  ).toBe( TokenType.STRING ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 2 ) ;
+    } ) ;
+
+    test( "line continuation via backslash + CRLF" , () =>
+    {
+        const source = "\"a\\\r\nb\"" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 2 ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — string error cases" , () =>
+{
+    test( "unterminated string points to the opening quote" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "  \"foo" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated string literal" ) ;
+        expect( caught.offset ).toBe( 2 ) ;
+        expect( caught.line   ).toBe( 1 ) ;
+        expect( caught.column ).toBe( 3 ) ;
+    } ) ;
+
+    test( "bare line terminator inside string is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"foo\nbar\"" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "cannot contain line terminators" ) ;
+        expect( caught.offset ).toBe( 4 ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\q\""   ,
+        "'\\z'"     ,
+        "\"\\a\""
+    ] )( "unknown escape %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "invalid escape sequence" ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\x\""    ,
+        "\"\\x1\""   ,
+        "\"\\xG1\""  ,
+        "\"\\x1G\""
+    ] )( "invalid hex escape %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "invalid hex escape" ) ;
+    } ) ;
+
+    test.each(
+    [
+        "\"\\u\""      ,
+        "\"\\u00\""    ,
+        "\"\\u00G0\""  ,
+        "\"\\u{ZZ}\""
+    ] )( "invalid unicode escape %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "invalid unicode escape" ) ;
+    } ) ;
+
+    test( "empty braced unicode escape is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"\\u{}\"" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "cannot be empty" ) ;
+    } ) ;
+
+    test( "unterminated braced unicode escape is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"\\u{12\"" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated unicode escape" ) ;
+    } ) ;
+
+    test( "out-of-range braced unicode escape is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"\\u{110000}\"" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "out of range" ) ;
+    } ) ;
+
+    test( "octal escape \\00 is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"\\00\"" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "octal escape" ) ;
+    } ) ;
+
+    test( "trailing backslash at EOF is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "\"foo\\" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated escape" ) ;
+    } ) ;
+} ) ;
+
