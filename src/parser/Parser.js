@@ -15,16 +15,19 @@
  * next sub-steps.
  */
 
-import EdenSyntaxError       from "../errors/EdenSyntaxError.js" ;
-import TokenType             from "../lexer/TokenType.js" ;
-import createArrayExpression from "./ast/createArrayExpression.js" ;
-import createLiteral         from "./ast/createLiteral.js" ;
-import createProgram         from "./ast/createProgram.js" ;
-import LiteralKind           from "./ast/LiteralKind.js" ;
-import ProgramMode           from "./ast/ProgramMode.js" ;
-import parseBigIntLiteral    from "./helpers/parseBigIntLiteral.js" ;
-import parseNumericLiteral   from "./helpers/parseNumericLiteral.js" ;
-import parseStringLiteral    from "./helpers/parseStringLiteral.js" ;
+import EdenSyntaxError        from "../errors/EdenSyntaxError.js" ;
+import TokenType              from "../lexer/TokenType.js" ;
+import createArrayExpression  from "./ast/createArrayExpression.js" ;
+import createIdentifier       from "./ast/createIdentifier.js" ;
+import createLiteral          from "./ast/createLiteral.js" ;
+import createObjectExpression from "./ast/createObjectExpression.js" ;
+import createProgram          from "./ast/createProgram.js" ;
+import createProperty         from "./ast/createProperty.js" ;
+import LiteralKind            from "./ast/LiteralKind.js" ;
+import ProgramMode            from "./ast/ProgramMode.js" ;
+import parseBigIntLiteral     from "./helpers/parseBigIntLiteral.js" ;
+import parseNumericLiteral    from "./helpers/parseNumericLiteral.js" ;
+import parseStringLiteral     from "./helpers/parseStringLiteral.js" ;
 
 /**
  * Handwritten recursive-descent parser.
@@ -295,6 +298,194 @@ export default class Parser
     }
 
     /**
+     * Parses a `{ ... }` object expression starting at the current
+     * offset. The opening `{` is expected to be the current token.
+     *
+     * Trailing commas are accepted (SPEC.md §3.5). In data mode,
+     * shorthand properties (`{ foo }`) and computed keys
+     * (`{ [expr]: v }`) are rejected with explicit messages.
+     *
+     * Duplicate keys are not deduplicated here: each property is
+     * preserved in its source order, matching the ESTree convention.
+     *
+     * @returns {import("./ast/createObjectExpression.js").ObjectExpression}
+     */
+    #parseObject()
+    {
+        const open = this.#consume() ;
+
+        const properties = [] ;
+
+        let next = this.#peek() ;
+
+        if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "}" )
+        {
+            this.#consume() ;
+            return createObjectExpression( properties , open.offset , open.line , open.column ) ;
+        }
+
+        while ( true )
+        {
+            next = this.#peek() ;
+
+            if ( next === undefined || next.type === TokenType.EOF )
+            {
+                throw this.#syntaxError( "Unterminated object." , open ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "[" )
+            {
+                throw this.#syntaxError(
+                    "Computed property keys are not allowed in data mode." ,
+                    next
+                ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+            {
+                throw this.#syntaxError(
+                    "Expected a property key but found \",\"." ,
+                    next
+                ) ;
+            }
+
+            const keyStart = next ;
+            const key      = this.#parsePropertyKey() ;
+
+            const afterKey = this.#peek() ;
+
+            if ( afterKey === undefined || afterKey.type === TokenType.EOF )
+            {
+                throw this.#syntaxError( "Unterminated object." , open ) ;
+            }
+
+            if ( afterKey.type !== TokenType.PUNCTUATOR || afterKey.value !== ":" )
+            {
+                if ( key.type === "Identifier" )
+                {
+                    throw this.#syntaxError(
+                        "Shorthand properties are not allowed in data mode. " +
+                        "Use the long form \"key: value\"." ,
+                        keyStart
+                    ) ;
+                }
+                throw this.#syntaxError(
+                    "Expected \":\" after property key." ,
+                    afterKey
+                ) ;
+            }
+
+            this.#consume() ;
+
+            const value = this.#parseValue() ;
+
+            properties.push( createProperty(
+                key ,
+                value ,
+                false ,
+                false ,
+                key.offset ,
+                key.line ,
+                key.column
+            ) ) ;
+
+            next = this.#peek() ;
+
+            if ( next === undefined || next.type === TokenType.EOF )
+            {
+                throw this.#syntaxError( "Unterminated object." , open ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "}" )
+            {
+                this.#consume() ;
+                return createObjectExpression( properties , open.offset , open.line , open.column ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+            {
+                this.#consume() ;
+
+                const after = this.#peek() ;
+                if ( after !== undefined &&
+                     after.type === TokenType.PUNCTUATOR &&
+                     after.value === "}" )
+                {
+                    this.#consume() ;
+                    return createObjectExpression( properties , open.offset , open.line , open.column ) ;
+                }
+                continue ;
+            }
+
+            throw this.#syntaxError(
+                "Expected \",\" or \"}\" after property value." ,
+                next
+            ) ;
+        }
+    }
+
+    /**
+     * Parses a single property key at the current position per
+     * SPEC.md §3.5: an `Identifier`, a `StringLiteral`, or a
+     * `NumericLiteral`. eden reserved keywords are rejected with
+     * an explicit message advising to wrap them in quotes.
+     *
+     * @returns {import("./ast/createIdentifier.js").Identifier |
+     *           import("./ast/createLiteral.js").Literal}
+     */
+    #parsePropertyKey()
+    {
+        const token = this.#peek() ;
+
+        if ( token === undefined || token.type === TokenType.EOF )
+        {
+            throw this.#syntaxError( "Expected a property key." , token ) ;
+        }
+
+        if ( token.type === TokenType.IDENTIFIER )
+        {
+            this.#consume() ;
+            return createIdentifier( token.value , token.offset , token.line , token.column ) ;
+        }
+
+        if ( token.type === TokenType.STRING )
+        {
+            this.#consume() ;
+            return createLiteral(
+                parseStringLiteral( token.value ) ,
+                token.value ,
+                LiteralKind.STRING ,
+                token.offset , token.line , token.column
+            ) ;
+        }
+
+        if ( token.type === TokenType.NUMBER )
+        {
+            this.#consume() ;
+            return createLiteral(
+                parseNumericLiteral( token.value ) ,
+                token.value ,
+                LiteralKind.NUMBER ,
+                token.offset , token.line , token.column
+            ) ;
+        }
+
+        if ( token.type === TokenType.KEYWORD )
+        {
+            throw this.#syntaxError(
+                `Keyword "${ token.value }" cannot be used as a property key without quotes. ` +
+                "Wrap it in double or single quotes." ,
+                token
+            ) ;
+        }
+
+        throw this.#syntaxError(
+            "Expected a property key (identifier, string, or number)." ,
+            token
+        ) ;
+    }
+
+    /**
      * Parses a single value at the current position and returns its
      * AST node. Dispatches on the next significant token type.
      *
@@ -321,6 +512,11 @@ export default class Parser
         if ( token.type === TokenType.PUNCTUATOR && token.value === "[" )
         {
             return this.#parseArray() ;
+        }
+
+        if ( token.type === TokenType.PUNCTUATOR && token.value === "{" )
+        {
+            return this.#parseObject() ;
         }
 
         throw this.#syntaxError(

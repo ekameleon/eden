@@ -580,3 +580,282 @@ describe( "parser — array error cases" , () =>
         expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
     } ) ;
 } ) ;
+
+describe( "parser — objects" , () =>
+{
+    test( "empty object" , () =>
+    {
+        const program = parseToAST( "{}" ) ;
+        const object  = program.body[ 0 ] ;
+
+        expect( object.type       ).toBe( NodeType.OBJECT_EXPRESSION ) ;
+        expect( object.properties ).toEqual( [] ) ;
+        expect( object.offset     ).toBe( 0 ) ;
+        expect( object.line       ).toBe( 1 ) ;
+        expect( object.column     ).toBe( 1 ) ;
+    } ) ;
+
+    test( "single property with identifier key" , () =>
+    {
+        const program  = parseToAST( "{ name: \"Marc\" }" ) ;
+        const object   = program.body[ 0 ] ;
+        const property = object.properties[ 0 ] ;
+
+        expect( object.properties ).toHaveLength( 1 ) ;
+        expect( property.type      ).toBe( NodeType.PROPERTY ) ;
+        expect( property.shorthand ).toBe( false ) ;
+        expect( property.computed  ).toBe( false ) ;
+        expect( property.key.type  ).toBe( NodeType.IDENTIFIER ) ;
+        expect( property.key.name  ).toBe( "name" ) ;
+        expect( property.value.type  ).toBe( NodeType.LITERAL ) ;
+        expect( property.value.value ).toBe( "Marc" ) ;
+    } ) ;
+
+    test( "multiple properties" , () =>
+    {
+        const program  = parseToAST( "{ a: 1, b: 2, c: 3 }" ) ;
+        const names    = program.body[ 0 ].properties.map( ( p ) => p.key.name ) ;
+        const values   = program.body[ 0 ].properties.map( ( p ) => p.value.value ) ;
+        expect( names  ).toEqual( [ "a" , "b" , "c" ] ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "trailing comma is accepted" , () =>
+    {
+        const program = parseToAST( "{ a: 1, b: 2, }" ) ;
+        expect( program.body[ 0 ].properties ).toHaveLength( 2 ) ;
+    } ) ;
+
+    test.each(
+    [
+        [ "{ foo: 1 }"    , NodeType.IDENTIFIER , "foo" ] ,
+        [ "{ \"bar\": 1 }", NodeType.LITERAL    , "bar" ] ,
+        [ "{ 'baz': 1 }"  , NodeType.LITERAL    , "baz" ] ,
+        [ "{ 42: true }"  , NodeType.LITERAL    , 42    ] ,
+        [ "{ 0xFF: 1 }"   , NodeType.LITERAL    , 255   ]
+    ] )( "property key %p has the expected type and value" ,
+         ( source , expectedKeyType , expectedKeyValue ) =>
+    {
+        const program = parseToAST( source ) ;
+        const key     = program.body[ 0 ].properties[ 0 ].key ;
+
+        expect( key.type ).toBe( expectedKeyType ) ;
+        if ( expectedKeyType === NodeType.IDENTIFIER )
+        {
+            expect( key.name ).toBe( expectedKeyValue ) ;
+        }
+        else
+        {
+            expect( key.value ).toBe( expectedKeyValue ) ;
+        }
+    } ) ;
+
+    test( "nested objects" , () =>
+    {
+        const program = parseToAST( "{ outer: { inner: 1 } }" ) ;
+        const outer   = program.body[ 0 ] ;
+        const inner   = outer.properties[ 0 ].value ;
+
+        expect( outer.type ).toBe( NodeType.OBJECT_EXPRESSION ) ;
+        expect( inner.type ).toBe( NodeType.OBJECT_EXPRESSION ) ;
+        expect( inner.properties[ 0 ].key.name    ).toBe( "inner" ) ;
+        expect( inner.properties[ 0 ].value.value ).toBe( 1 ) ;
+    } ) ;
+
+    test( "object with mixed value types including an array" , () =>
+    {
+        const program  = parseToAST( "{ tags: [\"a\", \"b\"], count: 2 }" ) ;
+        const props    = program.body[ 0 ].properties ;
+
+        expect( props[ 0 ].key.name  ).toBe( "tags" ) ;
+        expect( props[ 0 ].value.type ).toBe( NodeType.ARRAY_EXPRESSION ) ;
+        expect( props[ 0 ].value.elements ).toHaveLength( 2 ) ;
+        expect( props[ 1 ].key.name  ).toBe( "count" ) ;
+        expect( props[ 1 ].value.value ).toBe( 2 ) ;
+    } ) ;
+
+    test( "duplicate keys are preserved in order (AST level)" , () =>
+    {
+        const program = parseToAST( "{ a: 1, a: 2 }" ) ;
+        const props   = program.body[ 0 ].properties ;
+        expect( props ).toHaveLength( 2 ) ;
+        expect( props[ 0 ].value.value ).toBe( 1 ) ;
+        expect( props[ 1 ].value.value ).toBe( 2 ) ;
+    } ) ;
+
+    test( "unicode identifier as property key" , () =>
+    {
+        const program = parseToAST( "{ café: 1 }" ) ;
+        const key     = program.body[ 0 ].properties[ 0 ].key ;
+        expect( key.type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( key.name ).toBe( "café" ) ;
+    } ) ;
+
+    test( "comments between properties are skipped" , () =>
+    {
+        const program = parseToAST( "{ a: 1, // comment\n  b: 2 /* inline */ }" ) ;
+        const props   = program.body[ 0 ].properties ;
+        expect( props ).toHaveLength( 2 ) ;
+        expect( props[ 0 ].key.name ).toBe( "a" ) ;
+        expect( props[ 1 ].key.name ).toBe( "b" ) ;
+    } ) ;
+
+    test( "object position reflects the opening \"{\"" , () =>
+    {
+        const program = parseToAST( "  { x: 1 }" ) ;
+        const object  = program.body[ 0 ] ;
+        expect( object.offset ).toBe( 2 ) ;
+        expect( object.line   ).toBe( 1 ) ;
+        expect( object.column ).toBe( 3 ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — object error cases" , () =>
+{
+    test( "unterminated after opening \"{\" is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toMatch( /expected a property key|unterminated object/ ) ;
+    } ) ;
+
+    test( "shorthand property is rejected in data mode" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "shorthand" ) ;
+    } ) ;
+
+    test( "missing value after \":\" is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "unterminated after value is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: 1" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated object" ) ;
+    } ) ;
+
+    test( "leading comma is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ , }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "expected a property key" ) ;
+    } ) ;
+
+    test( "double comma is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: 1,, b: 2 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "keyword as property key is rejected with a hint" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ null: 1 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "cannot be used as a property key" ) ;
+    } ) ;
+
+    test( "computed property key is rejected in data mode" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ [x]: 1 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "computed property keys are not allowed" ) ;
+    } ) ;
+
+    test( "missing colon between key and value is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a 1 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "string-key shorthand attempt is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ \"a\" }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "expected \":\"" ) ;
+    } ) ;
+} ) ;
