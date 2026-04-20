@@ -395,3 +395,188 @@ describe( "parser — template literals" , () =>
         expect( program.body[ 0 ].value ).toBe( "SELECT * FROM t WHERE id = ${id}" ) ;
     } ) ;
 } ) ;
+
+describe( "parser — arrays" , () =>
+{
+    test( "empty array" , () =>
+    {
+        const program = parseToAST( "[]" ) ;
+        const array   = program.body[ 0 ] ;
+
+        expect( array.type     ).toBe( NodeType.ARRAY_EXPRESSION ) ;
+        expect( array.elements ).toEqual( [] ) ;
+        expect( array.offset   ).toBe( 0 ) ;
+        expect( array.line     ).toBe( 1 ) ;
+        expect( array.column   ).toBe( 1 ) ;
+    } ) ;
+
+    test( "single-element array" , () =>
+    {
+        const program = parseToAST( "[42]" ) ;
+        const array   = program.body[ 0 ] ;
+
+        expect( array.type ).toBe( NodeType.ARRAY_EXPRESSION ) ;
+        expect( array.elements ).toHaveLength( 1 ) ;
+        expect( array.elements[ 0 ].type  ).toBe( NodeType.LITERAL ) ;
+        expect( array.elements[ 0 ].value ).toBe( 42 ) ;
+    } ) ;
+
+    test( "multi-element array" , () =>
+    {
+        const program = parseToAST( "[1, 2, 3]" ) ;
+        const values  = program.body[ 0 ].elements.map( ( e ) => e.value ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "trailing comma is accepted" , () =>
+    {
+        const program = parseToAST( "[1, 2, 3,]" ) ;
+        const values  = program.body[ 0 ].elements.map( ( e ) => e.value ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "array of mixed types" , () =>
+    {
+        const program  = parseToAST( "[null, true, \"s\", 1, 1n, `t`]" ) ;
+        const elements = program.body[ 0 ].elements ;
+
+        expect( elements.map( ( e ) => e.kind ) ).toEqual(
+        [
+            LiteralKind.NULL ,
+            LiteralKind.BOOLEAN ,
+            LiteralKind.STRING ,
+            LiteralKind.NUMBER ,
+            LiteralKind.BIGINT ,
+            LiteralKind.TEMPLATE
+        ] ) ;
+    } ) ;
+
+    test( "nested arrays" , () =>
+    {
+        const program = parseToAST( "[[1, 2], [3, 4]]" ) ;
+        const outer   = program.body[ 0 ] ;
+
+        expect( outer.type ).toBe( NodeType.ARRAY_EXPRESSION ) ;
+        expect( outer.elements ).toHaveLength( 2 ) ;
+        for ( const inner of outer.elements )
+        {
+            expect( inner.type ).toBe( NodeType.ARRAY_EXPRESSION ) ;
+            expect( inner.elements ).toHaveLength( 2 ) ;
+        }
+    } ) ;
+
+    test( "multi-line array" , () =>
+    {
+        const program = parseToAST( "[\n  1,\n  2,\n  3\n]" ) ;
+        const values  = program.body[ 0 ].elements.map( ( e ) => e.value ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "comments between elements are skipped" , () =>
+    {
+        const program = parseToAST( "[1, /* mid */ 2, // trailing\n 3]" ) ;
+        const values  = program.body[ 0 ].elements.map( ( e ) => e.value ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "array position reflects the opening \"[\"" , () =>
+    {
+        const program = parseToAST( "  [1]" ) ;
+        const array   = program.body[ 0 ] ;
+        expect( array.offset ).toBe( 2 ) ;
+        expect( array.line   ).toBe( 1 ) ;
+        expect( array.column ).toBe( 3 ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — array error cases" , () =>
+{
+    test( "unterminated after opening \"[\" is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toMatch( /expected a value|unterminated array/ ) ;
+    } ) ;
+
+    test( "unterminated after element is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated array" ) ;
+    } ) ;
+
+    test( "elision [,] is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[,]" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "elisions are not supported" ) ;
+    } ) ;
+
+    test( "elision [1,,2] is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1,,2]" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "elisions are not supported" ) ;
+    } ) ;
+
+    test( "missing comma between elements is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1 2]" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "expected \",\" or \"]\"" ) ;
+    } ) ;
+
+    test( "unterminated after trailing comma is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1," ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+} ) ;

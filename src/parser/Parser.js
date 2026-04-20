@@ -15,15 +15,16 @@
  * next sub-steps.
  */
 
-import EdenSyntaxError     from "../errors/EdenSyntaxError.js" ;
-import TokenType           from "../lexer/TokenType.js" ;
-import createLiteral       from "./ast/createLiteral.js" ;
-import createProgram       from "./ast/createProgram.js" ;
-import LiteralKind         from "./ast/LiteralKind.js" ;
-import ProgramMode         from "./ast/ProgramMode.js" ;
-import parseBigIntLiteral  from "./helpers/parseBigIntLiteral.js" ;
-import parseNumericLiteral from "./helpers/parseNumericLiteral.js" ;
-import parseStringLiteral  from "./helpers/parseStringLiteral.js" ;
+import EdenSyntaxError       from "../errors/EdenSyntaxError.js" ;
+import TokenType             from "../lexer/TokenType.js" ;
+import createArrayExpression from "./ast/createArrayExpression.js" ;
+import createLiteral         from "./ast/createLiteral.js" ;
+import createProgram         from "./ast/createProgram.js" ;
+import LiteralKind           from "./ast/LiteralKind.js" ;
+import ProgramMode           from "./ast/ProgramMode.js" ;
+import parseBigIntLiteral    from "./helpers/parseBigIntLiteral.js" ;
+import parseNumericLiteral   from "./helpers/parseNumericLiteral.js" ;
+import parseStringLiteral    from "./helpers/parseStringLiteral.js" ;
 
 /**
  * Handwritten recursive-descent parser.
@@ -93,6 +94,84 @@ export default class Parser
             throw this.#syntaxError(
                 `Unexpected token "${ token.value }" after value.` ,
                 token
+            ) ;
+        }
+    }
+
+    /**
+     * Parses an `[ ... ]` array expression starting at the current
+     * offset. The opening `[` is expected to be the current token.
+     *
+     * Trailing commas are accepted (SPEC.md §3.4). Elisions such as
+     * `[1, , 3]` are rejected with an explicit message.
+     *
+     * @returns {import("./ast/createArrayExpression.js").ArrayExpression}
+     */
+    #parseArray()
+    {
+        const open = this.#consume() ;
+
+        const elements = [] ;
+
+        let next = this.#peek() ;
+
+        if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "]" )
+        {
+            this.#consume() ;
+            return createArrayExpression( elements , open.offset , open.line , open.column ) ;
+        }
+
+        while ( true )
+        {
+            next = this.#peek() ;
+
+            if ( next === undefined || next.type === TokenType.EOF )
+            {
+                throw this.#syntaxError( "Unterminated array." , open ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+            {
+                throw this.#syntaxError(
+                    "Elisions are not supported in arrays. " +
+                    "Use \"undefined\" or \"null\" explicitly." ,
+                    next
+                ) ;
+            }
+
+            elements.push( this.#parseValue() ) ;
+
+            next = this.#peek() ;
+
+            if ( next === undefined || next.type === TokenType.EOF )
+            {
+                throw this.#syntaxError( "Unterminated array." , open ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "]" )
+            {
+                this.#consume() ;
+                return createArrayExpression( elements , open.offset , open.line , open.column ) ;
+            }
+
+            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+            {
+                this.#consume() ;
+
+                const after = this.#peek() ;
+                if ( after !== undefined &&
+                     after.type === TokenType.PUNCTUATOR &&
+                     after.value === "]" )
+                {
+                    this.#consume() ;
+                    return createArrayExpression( elements , open.offset , open.line , open.column ) ;
+                }
+                continue ;
+            }
+
+            throw this.#syntaxError(
+                "Expected \",\" or \"]\" after array element." ,
+                next
             ) ;
         }
     }
@@ -237,6 +316,11 @@ export default class Parser
             case TokenType.BIGINT   : return this.#parseLiteralBigInt(   this.#consume() ) ;
             case TokenType.STRING   : return this.#parseLiteralString(   this.#consume() ) ;
             case TokenType.TEMPLATE : return this.#parseLiteralTemplate( this.#consume() ) ;
+        }
+
+        if ( token.type === TokenType.PUNCTUATOR && token.value === "[" )
+        {
+            return this.#parseArray() ;
         }
 
         throw this.#syntaxError(
