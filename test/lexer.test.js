@@ -21,8 +21,8 @@ from "../src/index.js" ;
  * Convenience helper: asserts a single EOF token at the given
  * position and returns the token itself for further inspection.
  *
- * @param   {import("../src/lexer/Token.js").Token[]} tokens
- * @returns {import("../src/lexer/Token.js").Token}
+ * @param   {import("../src/lexer/createToken.js").Token[]} tokens
+ * @returns {import("../src/lexer/createToken.js").Token}
  */
 function expectSingleEOF( tokens )
 {
@@ -188,5 +188,225 @@ describe( "lexer — API contract" , () =>
     {
         const eof = expectSingleEOF( tokenize( "" , { someUnknownOption: true } ) ) ;
         expect( eof.type ).toBe( TokenType.EOF ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — punctuators" , () =>
+{
+    test.each(
+    [
+        "{" , "}" ,
+        "[" , "]" ,
+        "(" , ")" ,
+        "," , ":" , ";" ,
+        "." , "=" ,
+        "+" , "-"
+    ] )( "single-character punctuator %p" , ( source ) =>
+    {
+        const tokens = tokenize( source ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.PUNCTUATOR ,
+            value:  source ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "\"...\" is lexed as a single token" , () =>
+    {
+        const tokens = tokenize( "..." ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.PUNCTUATOR ,
+            value:  "..." ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].offset ).toBe( 3 ) ;
+        expect( tokens[ 1 ].column ).toBe( 4 ) ;
+    } ) ;
+
+    test( "\"..\" is lexed as two separate \".\" tokens" , () =>
+    {
+        const tokens = tokenize( ".." ) ;
+        expect( tokens ).toHaveLength( 3 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "." ) ;
+        expect( tokens[ 0 ].column ).toBe( 1 ) ;
+        expect( tokens[ 1 ].value  ).toBe( "." ) ;
+        expect( tokens[ 1 ].column ).toBe( 2 ) ;
+        expect( tokens[ 2 ].type   ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "multiple punctuators with whitespace preserve positions" , () =>
+    {
+        const tokens = tokenize( "{ } [ ]" ) ;
+        expect( tokens.map( ( t ) => t.value ) ).toEqual(
+            [ "{" , "}" , "[" , "]" , "" ]
+        ) ;
+        expect( tokens.map( ( t ) => t.column ) ).toEqual(
+            [ 1 , 3 , 5 , 7 , 8 ]
+        ) ;
+    } ) ;
+
+    test( "stray \"/\" raises EdenSyntaxError at its position" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( " / " ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.offset ).toBe( 1 ) ;
+        expect( caught.line   ).toBe( 1 ) ;
+        expect( caught.column ).toBe( 2 ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — line comments" , () =>
+{
+    test( "empty \"//\" at end of input" , () =>
+    {
+        const tokens = tokenize( "//" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.LINE_COMMENT ,
+            value:  "//" ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+        expect( tokens[ 1 ].column ).toBe( 3 ) ;
+    } ) ;
+
+    test( "\"// foo\" with no trailing terminator" , () =>
+    {
+        const tokens = tokenize( "// foo" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "// foo" ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.LINE_COMMENT ) ;
+        expect( tokens[ 1 ].offset ).toBe( 6 ) ;
+        expect( tokens[ 1 ].column ).toBe( 7 ) ;
+    } ) ;
+
+    test( "\"// foo\\n\" leaves the LF for the main loop" , () =>
+    {
+        const tokens = tokenize( "// foo\n" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "// foo" ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+        expect( tokens[ 1 ].line   ).toBe( 2 ) ;
+        expect( tokens[ 1 ].column ).toBe( 1 ) ;
+    } ) ;
+
+    test( "two consecutive line comments" , () =>
+    {
+        const tokens = tokenize( "// line1\n// line2" ) ;
+        expect( tokens ).toHaveLength( 3 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "// line1" ) ;
+        expect( tokens[ 0 ].line   ).toBe( 1 ) ;
+        expect( tokens[ 0 ].column ).toBe( 1 ) ;
+        expect( tokens[ 1 ].value  ).toBe( "// line2" ) ;
+        expect( tokens[ 1 ].line   ).toBe( 2 ) ;
+        expect( tokens[ 1 ].column ).toBe( 1 ) ;
+        expect( tokens[ 2 ].type   ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "line comment stops at CR (CRLF-safe)" , () =>
+    {
+        const tokens = tokenize( "// foo\r\n" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "// foo" ) ;
+        expect( tokens[ 1 ].line   ).toBe( 2 ) ;
+        expect( tokens[ 1 ].column ).toBe( 1 ) ;
+    } ) ;
+} ) ;
+
+describe( "lexer — block comments" , () =>
+{
+    test( "empty block comment" , () =>
+    {
+        const tokens = tokenize( "/**/" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ] ).toEqual(
+        {
+            type:   TokenType.BLOCK_COMMENT ,
+            value:  "/**/" ,
+            offset: 0 ,
+            line:   1 ,
+            column: 1
+        } ) ;
+        expect( tokens[ 1 ].column ).toBe( 5 ) ;
+    } ) ;
+
+    test( "single-line block comment with text" , () =>
+    {
+        const tokens = tokenize( "/* foo */" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "/* foo */" ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.BLOCK_COMMENT ) ;
+        expect( tokens[ 1 ].column ).toBe( 10 ) ;
+    } ) ;
+
+    test( "multi-line block comment updates line and column correctly" , () =>
+    {
+        const source = "/* a\n b */" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value  ).toBe( source ) ;
+        expect( tokens[ 0 ].line   ).toBe( 1 ) ;
+        expect( tokens[ 0 ].column ).toBe( 1 ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+        expect( tokens[ 1 ].line   ).toBe( 2 ) ;
+        expect( tokens[ 1 ].column ).toBe( 6 ) ;
+        expect( tokens[ 1 ].offset ).toBe( source.length ) ;
+    } ) ;
+
+    test( "CRLF inside a block comment counts as a single line terminator" , () =>
+    {
+        const source = "/* a\r\n b */" ;
+        const tokens = tokenize( source ) ;
+        expect( tokens[ 0 ].value ).toBe( source ) ;
+        expect( tokens[ 1 ].line  ).toBe( 2 ) ;
+        expect( tokens[ 1 ].column ).toBe( 6 ) ;
+    } ) ;
+
+    test( "block comments do not nest: first \"*/\" closes it" , () =>
+    {
+        const tokens = tokenize( "/* /* */" ) ;
+        expect( tokens ).toHaveLength( 2 ) ;
+        expect( tokens[ 0 ].value  ).toBe( "/* /* */" ) ;
+        expect( tokens[ 0 ].type   ).toBe( TokenType.BLOCK_COMMENT ) ;
+        expect( tokens[ 1 ].type   ).toBe( TokenType.EOF ) ;
+    } ) ;
+
+    test( "unterminated block comment points to the opening \"/*\"" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            tokenize( "  /* never ends" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated block comment" ) ;
+        expect( caught.offset ).toBe( 2 ) ;
+        expect( caught.line   ).toBe( 1 ) ;
+        expect( caught.column ).toBe( 3 ) ;
     } ) ;
 } ) ;

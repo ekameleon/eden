@@ -92,6 +92,28 @@ export default class Lexer
                 continue ;
             }
 
+            if ( char === "/" )
+            {
+                const next = this.#source[ this.#offset + 1 ] ;
+                if ( next === "/" )
+                {
+                    this.#readLineComment() ;
+                    continue ;
+                }
+                if ( next === "*" )
+                {
+                    this.#readBlockComment() ;
+                    continue ;
+                }
+                this.#unexpected( char ) ;
+            }
+
+            if ( this.#isPunctuatorStart( char ) )
+            {
+                this.#readPunctuator( char ) ;
+                continue ;
+            }
+
             this.#unexpected( char ) ;
         }
 
@@ -179,6 +201,163 @@ export default class Lexer
     {
         this.#offset += 1 ;
         this.#column += 1 ;
+    }
+
+    /**
+     * Returns `true` if `char` may start a punctuator token per
+     * SPEC.md §2.5. The `"..."` token is handled in
+     * `#readPunctuator()` via a two-character lookahead.
+     *
+     * Note: numeric literals starting with `.` (for example `.5`)
+     * are not yet recognized; they will be handled in sub-step 4.
+     *
+     * @param   {string} char
+     * @returns {boolean}
+     */
+    #isPunctuatorStart( char )
+    {
+        switch ( char )
+        {
+            case "{" : case "}" :
+            case "[" : case "]" :
+            case "(" : case ")" :
+            case "," : case ":" : case ";" :
+            case "." : case "=" :
+            case "+" : case "-" :
+                return true ;
+
+            default :
+                return false ;
+        }
+    }
+
+    /**
+     * Reads a single punctuator token starting at the current
+     * offset and pushes it to the output stream. Handles the
+     * three-character lookahead for `"..."`.
+     *
+     * @param {string} char - The first character of the punctuator.
+     */
+    #readPunctuator( char )
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let value = char ;
+
+        if ( char === "." &&
+             this.#source[ this.#offset + 1 ] === "." &&
+             this.#source[ this.#offset + 2 ] === "." )
+        {
+            value = "..." ;
+            this.#offset += 3 ;
+            this.#column += 3 ;
+        }
+        else
+        {
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        this.#tokens.push( createToken(
+            TokenType.PUNCTUATOR ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
+    }
+
+    /**
+     * Reads a `//` line comment starting at the current offset.
+     * The comment runs up to (but not including) the next line
+     * terminator or end of input; the terminator itself is left
+     * for the main loop to consume, so `#line` and `#column` are
+     * updated correctly.
+     */
+    #readLineComment()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        let end = this.#offset ;
+        while ( end < this.#length && !this.#isLineTerminator( this.#source[ end ] ) )
+        {
+            end += 1 ;
+        }
+
+        const value = this.#source.slice( startOffset , end ) ;
+        this.#column += end - this.#offset ;
+        this.#offset  = end ;
+
+        this.#tokens.push( createToken(
+            TokenType.LINE_COMMENT ,
+            value ,
+            startOffset ,
+            startLine ,
+            startColumn
+        ) ) ;
+    }
+
+    /**
+     * Reads a `/* ... *\/` block comment starting at the current
+     * offset. Block comments do not nest (SPEC.md §2.4); the first
+     * `*\/` encountered ends the comment. Embedded line
+     * terminators (including CRLF) correctly update `#line` and
+     * `#column`. If end-of-input is reached before the closing
+     * `*\/`, an `EdenSyntaxError` is raised at the position of the
+     * opening `/*`.
+     */
+    #readBlockComment()
+    {
+        const startOffset = this.#offset ;
+        const startLine   = this.#line ;
+        const startColumn = this.#column ;
+
+        this.#offset += 2 ;
+        this.#column += 2 ;
+
+        while ( this.#offset < this.#length )
+        {
+            const ch = this.#source[ this.#offset ] ;
+
+            if ( ch === "*" && this.#source[ this.#offset + 1 ] === "/" )
+            {
+                this.#offset += 2 ;
+                this.#column += 2 ;
+
+                const value = this.#source.slice( startOffset , this.#offset ) ;
+                this.#tokens.push( createToken(
+                    TokenType.BLOCK_COMMENT ,
+                    value ,
+                    startOffset ,
+                    startLine ,
+                    startColumn
+                ) ) ;
+                return ;
+            }
+
+            if ( this.#isLineTerminator( ch ) )
+            {
+                this.#consumeLineTerminator( ch ) ;
+                continue ;
+            }
+
+            this.#offset += 1 ;
+            this.#column += 1 ;
+        }
+
+        throw new EdenSyntaxError(
+            "Unterminated block comment." ,
+            {
+                source: this.#source ,
+                offset: startOffset ,
+                line:   startLine ,
+                column: startColumn
+            }
+        ) ;
     }
 
     /**
