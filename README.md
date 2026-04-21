@@ -43,15 +43,15 @@ a full scripting language.
 ## Installation
 
 ```bash
-npm install @oihana/eden
+npm install @ekameleon/eden
 # or
-bun add @oihana/eden
+bun add @ekameleon/eden
 ```
 
 ### CDN
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/@oihana/eden"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ekameleon/eden"></script>
 <script>
     const data = eden.parse(source);
 </script>
@@ -62,7 +62,7 @@ bun add @oihana/eden
 ### Data mode (safe by default)
 
 ```js
-import { parse, stringify } from "@oihana/eden";
+import { parse, stringify } from "@ekameleon/eden";
 
 const value = parse(`{
     name: "Marc",
@@ -75,7 +75,7 @@ const text = stringify(value, { indent: 4, unquotedKeys: true });
 ### Evaluation mode (opt-in, scoped)
 
 ```js
-import { evaluate } from "@oihana/eden";
+import { evaluate } from "@ekameleon/eden";
 
 const result = evaluate(
     `user = { name: "Marc", joined: new Date("2024-01-15") }`,
@@ -92,7 +92,7 @@ const result = evaluate(
 ### Convert to / from JSON
 
 ```js
-import { toJSON, fromJSON } from "@oihana/eden";
+import { toJSON, fromJSON } from "@ekameleon/eden";
 
 const jsonText = toJSON(edenValue, { jsonCompatible: true });
 const edenText = fromJSON(jsonSource);
