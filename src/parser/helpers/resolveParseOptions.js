@@ -8,20 +8,24 @@
  */
 
 /**
+ * @typedef {"data" | "eval"} ParseMode
+ *
  * @typedef {object} ParseOptions
- * @property {boolean} [allowComments=true]
- * @property {boolean} [allowTrailingCommas=true]
- * @property {boolean} [allowSingleQuotes=true]
- * @property {boolean} [allowUnquotedKeys=true]
- * @property {boolean} [allowTemplates=true]
- * @property {boolean} [allowBigInt=true]
- * @property {boolean} [strictMode=true]
- * @property {number}  [maxDepth=1024]
- * @property {number}  [maxStringLength=Infinity]
+ * @property {ParseMode} [mode="data"]
+ * @property {boolean}   [allowComments=true]
+ * @property {boolean}   [allowTrailingCommas=true]
+ * @property {boolean}   [allowSingleQuotes=true]
+ * @property {boolean}   [allowUnquotedKeys=true]
+ * @property {boolean}   [allowTemplates=true]
+ * @property {boolean}   [allowBigInt=true]
+ * @property {boolean}   [strictMode=true]
+ * @property {number}    [maxDepth=1024]
+ * @property {number}    [maxStringLength=Infinity]
  */
 
 const DEFAULTS = Object.freeze(
 {
+    mode:                "data"    ,
     allowComments:       true      ,
     allowTrailingCommas: true      ,
     allowSingleQuotes:   true      ,

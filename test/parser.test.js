@@ -1087,3 +1087,319 @@ describe( "parser — ParseOptions" , () =>
         expect( program.body[ 0 ].elements ).toHaveLength( 2 ) ;
     } ) ;
 } ) ;
+
+describe( "parser — eval mode: identifiers and member paths" , () =>
+{
+    test( "identifier alone produces an Identifier node" , () =>
+    {
+        const program = parseToAST( "foo" , { mode: "eval" } ) ;
+
+        expect( program.mode ).toBe( ProgramMode.EVAL ) ;
+        expect( program.body ).toHaveLength( 1 ) ;
+
+        const node = program.body[ 0 ] ;
+        expect( node.type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( node.name ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "dot member access produces a left-associative chain" , () =>
+    {
+        const program = parseToAST( "foo.bar.baz" , { mode: "eval" } ) ;
+        const outer   = program.body[ 0 ] ;
+
+        expect( outer.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( outer.computed      ).toBe( false ) ;
+        expect( outer.property.name ).toBe( "baz" ) ;
+
+        const middle = outer.object ;
+        expect( middle.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( middle.property.name ).toBe( "bar" ) ;
+        expect( middle.object.name   ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "bracket member access with a string literal" , () =>
+    {
+        const program = parseToAST( "foo[\"x\"]" , { mode: "eval" } ) ;
+        const member  = program.body[ 0 ] ;
+
+        expect( member.type     ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( member.computed ).toBe( true ) ;
+        expect( member.property.type  ).toBe( NodeType.LITERAL ) ;
+        expect( member.property.kind  ).toBe( LiteralKind.STRING ) ;
+        expect( member.property.value ).toBe( "x" ) ;
+    } ) ;
+
+    test( "bracket member access with a numeric literal" , () =>
+    {
+        const program = parseToAST( "foo[42]" , { mode: "eval" } ) ;
+        const member  = program.body[ 0 ] ;
+
+        expect( member.computed       ).toBe( true ) ;
+        expect( member.property.kind  ).toBe( LiteralKind.NUMBER ) ;
+        expect( member.property.value ).toBe( 42 ) ;
+    } ) ;
+
+    test( "mixed dot and bracket member access" , () =>
+    {
+        const program = parseToAST( "foo.a[\"b\"].c" , { mode: "eval" } ) ;
+        const outer   = program.body[ 0 ] ;
+
+        expect( outer.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( outer.computed      ).toBe( false ) ;
+        expect( outer.property.name ).toBe( "c" ) ;
+
+        const middle = outer.object ;
+        expect( middle.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( middle.computed      ).toBe( true ) ;
+        expect( middle.property.value ).toBe( "b" ) ;
+
+        const inner = middle.object ;
+        expect( inner.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( inner.property.name ).toBe( "a" ) ;
+        expect( inner.object.name   ).toBe( "foo" ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: calls" , () =>
+{
+    test( "call with no arguments" , () =>
+    {
+        const program = parseToAST( "foo()" , { mode: "eval" } ) ;
+        const call    = program.body[ 0 ] ;
+
+        expect( call.type              ).toBe( NodeType.CALL_EXPRESSION ) ;
+        expect( call.callee.type       ).toBe( NodeType.IDENTIFIER ) ;
+        expect( call.callee.name       ).toBe( "foo" ) ;
+        expect( call.arguments         ).toEqual( [] ) ;
+    } ) ;
+
+    test( "call with multiple arguments" , () =>
+    {
+        const program = parseToAST( "foo(1, 2, 3)" , { mode: "eval" } ) ;
+        const call    = program.body[ 0 ] ;
+
+        expect( call.arguments ).toHaveLength( 3 ) ;
+        expect( call.arguments.map( ( a ) => a.value ) ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "call with trailing comma" , () =>
+    {
+        const program = parseToAST( "foo(\"a\", \"b\",)" , { mode: "eval" } ) ;
+        expect( program.body[ 0 ].arguments ).toHaveLength( 2 ) ;
+    } ) ;
+
+    test( "call on a member path" , () =>
+    {
+        const program = parseToAST( "foo.bar(x)" , { mode: "eval" } ) ;
+        const call    = program.body[ 0 ] ;
+
+        expect( call.type             ).toBe( NodeType.CALL_EXPRESSION ) ;
+        expect( call.callee.type      ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( call.arguments        ).toHaveLength( 1 ) ;
+        expect( call.arguments[ 0 ].name ).toBe( "x" ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: new expressions" , () =>
+{
+    test( "new without parentheses" , () =>
+    {
+        const program = parseToAST( "new Date" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type         ).toBe( NodeType.NEW_EXPRESSION ) ;
+        expect( node.callee.type  ).toBe( NodeType.IDENTIFIER ) ;
+        expect( node.callee.name  ).toBe( "Date" ) ;
+        expect( node.arguments    ).toEqual( [] ) ;
+    } ) ;
+
+    test( "new with no arguments" , () =>
+    {
+        const program = parseToAST( "new Map()" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type       ).toBe( NodeType.NEW_EXPRESSION ) ;
+        expect( node.callee.name ).toBe( "Map" ) ;
+        expect( node.arguments  ).toEqual( [] ) ;
+    } ) ;
+
+    test( "new with arguments" , () =>
+    {
+        const program = parseToAST( "new Date(\"2024-01-01\")" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.arguments ).toHaveLength( 1 ) ;
+        expect( node.arguments[ 0 ].value ).toBe( "2024-01-01" ) ;
+    } ) ;
+
+    test( "new on a namespaced constructor" , () =>
+    {
+        const program = parseToAST( "new Foo.Bar(\"x\")" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type        ).toBe( NodeType.NEW_EXPRESSION ) ;
+        expect( node.callee.type ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( node.callee.object.name  ).toBe( "Foo" ) ;
+        expect( node.callee.property.name ).toBe( "Bar" ) ;
+        expect( node.arguments   ).toHaveLength( 1 ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: unary and containers" , () =>
+{
+    test( "unary on an identifier" , () =>
+    {
+        const program = parseToAST( "-foo" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type              ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( node.operator          ).toBe( "-" ) ;
+        expect( node.argument.type     ).toBe( NodeType.IDENTIFIER ) ;
+        expect( node.argument.name     ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "unary on a member path" , () =>
+    {
+        const program = parseToAST( "-foo.bar" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type          ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( node.argument.type ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+    } ) ;
+
+    test( "unary on a call" , () =>
+    {
+        const program = parseToAST( "-foo()" , { mode: "eval" } ) ;
+        const node    = program.body[ 0 ] ;
+
+        expect( node.type          ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( node.argument.type ).toBe( NodeType.CALL_EXPRESSION ) ;
+    } ) ;
+
+    test( "array holds identifiers and unary expressions" , () =>
+    {
+        const program  = parseToAST( "[foo, bar, -baz]" , { mode: "eval" } ) ;
+        const elements = program.body[ 0 ].elements ;
+
+        expect( elements[ 0 ].type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( elements[ 0 ].name ).toBe( "foo" ) ;
+        expect( elements[ 1 ].name ).toBe( "bar" ) ;
+        expect( elements[ 2 ].type ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( elements[ 2 ].argument.name ).toBe( "baz" ) ;
+    } ) ;
+
+    test( "object holds identifier and call values" , () =>
+    {
+        const program = parseToAST( "{ name: foo, greeting: hello(\"Marc\") }" , { mode: "eval" } ) ;
+        const props   = program.body[ 0 ].properties ;
+
+        expect( props[ 0 ].value.type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( props[ 0 ].value.name ).toBe( "foo" ) ;
+        expect( props[ 1 ].value.type ).toBe( NodeType.CALL_EXPRESSION ) ;
+        expect( props[ 1 ].value.callee.name ).toBe( "hello" ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: mode routing and errors" , () =>
+{
+    test( "default mode is data: bare identifier is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "foo" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "eval mode Program carries mode: \"eval\"" , () =>
+    {
+        const program = parseToAST( "null" , { mode: "eval" } ) ;
+        expect( program.mode ).toBe( ProgramMode.EVAL ) ;
+    } ) ;
+
+    test( "bracket member access with a non-literal is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "foo[x]" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "bracket member access requires a string or number literal" ) ;
+    } ) ;
+
+    test( "member access after a call is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "foo().bar" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "chained member access after a call is not supported" ) ;
+    } ) ;
+
+    test( "chained call is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "foo()()" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "chained call is not supported" ) ;
+    } ) ;
+
+    test( "new without identifier is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "new" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "expected an identifier after \"new\"" ) ;
+    } ) ;
+
+    test( "unterminated argument list is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "foo(1, 2" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unterminated argument list" ) ;
+    } ) ;
+} ) ;
