@@ -23,11 +23,13 @@ import createLiteral          from "./ast/createLiteral.js" ;
 import createObjectExpression from "./ast/createObjectExpression.js" ;
 import createProgram          from "./ast/createProgram.js" ;
 import createProperty         from "./ast/createProperty.js" ;
+import createUnaryExpression  from "./ast/createUnaryExpression.js" ;
 import LiteralKind            from "./ast/LiteralKind.js" ;
 import ProgramMode            from "./ast/ProgramMode.js" ;
 import parseBigIntLiteral     from "./helpers/parseBigIntLiteral.js" ;
 import parseNumericLiteral    from "./helpers/parseNumericLiteral.js" ;
 import parseStringLiteral     from "./helpers/parseStringLiteral.js" ;
+import resolveParseOptions    from "./helpers/resolveParseOptions.js" ;
 
 /**
  * Handwritten recursive-descent parser.
@@ -46,7 +48,7 @@ export default class Parser
     {
         this.#tokens  = tokens ;
         this.#source  = source ;
-        this.#options = options ?? {} ;
+        this.#options = resolveParseOptions( options ) ;
         this.#index   = 0 ;
     }
 
@@ -159,13 +161,20 @@ export default class Parser
 
             if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
             {
-                this.#consume() ;
+                const commaToken = this.#consume() ;
 
                 const after = this.#peek() ;
                 if ( after !== undefined &&
                      after.type === TokenType.PUNCTUATOR &&
                      after.value === "]" )
                 {
+                    if ( !this.#options.allowTrailingCommas )
+                    {
+                        throw this.#syntaxError(
+                            "Trailing commas are not allowed." ,
+                            commaToken
+                        ) ;
+                    }
                     this.#consume() ;
                     return createArrayExpression( elements , open.offset , open.line , open.column ) ;
                 }
@@ -404,13 +413,20 @@ export default class Parser
 
             if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
             {
-                this.#consume() ;
+                const commaToken = this.#consume() ;
 
                 const after = this.#peek() ;
                 if ( after !== undefined &&
                      after.type === TokenType.PUNCTUATOR &&
                      after.value === "}" )
                 {
+                    if ( !this.#options.allowTrailingCommas )
+                    {
+                        throw this.#syntaxError(
+                            "Trailing commas are not allowed." ,
+                            commaToken
+                        ) ;
+                    }
                     this.#consume() ;
                     return createObjectExpression( properties , open.offset , open.line , open.column ) ;
                 }
@@ -486,6 +502,57 @@ export default class Parser
     }
 
     /**
+     * Parses a data-mode `UnaryValue` starting at the current offset
+     * (SPEC.md §3.1). The current token is expected to be `"+"` or
+     * `"-"`. The argument must be a `Number`, `BigInt`, or one of
+     * the numeric keywords `Infinity` / `NaN`.
+     *
+     * @returns {import("./ast/createUnaryExpression.js").UnaryExpression}
+     */
+    #parseUnaryValue()
+    {
+        const signToken = this.#consume() ;
+        const operator  = signToken.value ;
+
+        const next = this.#peek() ;
+
+        let argument ;
+
+        if ( next !== undefined )
+        {
+            if ( next.type === TokenType.NUMBER )
+            {
+                argument = this.#parseLiteralNumber( this.#consume() ) ;
+            }
+            else if ( next.type === TokenType.BIGINT )
+            {
+                argument = this.#parseLiteralBigInt( this.#consume() ) ;
+            }
+            else if ( next.type === TokenType.KEYWORD &&
+                      ( next.value === "Infinity" || next.value === "NaN" ) )
+            {
+                argument = this.#parseLiteralKeyword( this.#consume() ) ;
+            }
+        }
+
+        if ( argument === undefined )
+        {
+            throw this.#syntaxError(
+                `Unary operator "${ operator }" expects a Number, BigInt, Infinity or NaN.` ,
+                next
+            ) ;
+        }
+
+        return createUnaryExpression(
+            operator ,
+            argument ,
+            signToken.offset ,
+            signToken.line ,
+            signToken.column
+        ) ;
+    }
+
+    /**
      * Parses a single value at the current position and returns its
      * AST node. Dispatches on the next significant token type.
      *
@@ -519,6 +586,12 @@ export default class Parser
             return this.#parseObject() ;
         }
 
+        if ( token.type === TokenType.PUNCTUATOR &&
+             ( token.value === "+" || token.value === "-" ) )
+        {
+            return this.#parseUnaryValue() ;
+        }
+
         throw this.#syntaxError(
             `Unexpected token "${ token.value }".` ,
             token
@@ -540,7 +613,9 @@ export default class Parser
     /**
      * Advances `#index` past every `LINE_COMMENT` and `BLOCK_COMMENT`
      * token starting at the current position. Has no effect when the
-     * current token is significant.
+     * current token is significant. When `options.allowComments` is
+     * `false`, the first comment encountered raises
+     * `EdenSyntaxError`.
      */
     #skipTrivia()
     {
@@ -551,6 +626,10 @@ export default class Parser
                  current.type !== TokenType.BLOCK_COMMENT )
             {
                 break ;
+            }
+            if ( !this.#options.allowComments )
+            {
+                throw this.#syntaxError( "Comments are not allowed." , current ) ;
             }
             this.#index += 1 ;
         }

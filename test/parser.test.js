@@ -859,3 +859,231 @@ describe( "parser — object error cases" , () =>
         expect( caught.message.toLowerCase() ).toContain( "expected \":\"" ) ;
     } ) ;
 } ) ;
+
+describe( "parser — unary values" , () =>
+{
+    test.each(
+    [
+        [ "-1"       , "-" , 1      , LiteralKind.NUMBER ] ,
+        [ "+1"       , "+" , 1      , LiteralKind.NUMBER ] ,
+        [ "-1.5"     , "-" , 1.5    , LiteralKind.NUMBER ] ,
+        [ "+0xFF"    , "+" , 255    , LiteralKind.NUMBER ] ,
+        [ "-.5"      , "-" , 0.5    , LiteralKind.NUMBER ] ,
+        [ "-0o17"    , "-" , 15     , LiteralKind.NUMBER ] ,
+        [ "-0b101"   , "-" , 5      , LiteralKind.NUMBER ] ,
+        [ "-1e10"    , "-" , 1e10   , LiteralKind.NUMBER ]
+    ] )( "unary number %p -> operator %p, argument value %p" ,
+         ( source , operator , expectedValue , expectedKind ) =>
+    {
+        const program = parseToAST( source ) ;
+        const unary   = program.body[ 0 ] ;
+
+        expect( unary.type     ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( unary.operator ).toBe( operator ) ;
+        expect( unary.argument.type  ).toBe( NodeType.LITERAL ) ;
+        expect( unary.argument.value ).toBe( expectedValue ) ;
+        expect( unary.argument.kind  ).toBe( expectedKind ) ;
+        expect( unary.offset   ).toBe( 0 ) ;
+        expect( unary.line     ).toBe( 1 ) ;
+        expect( unary.column   ).toBe( 1 ) ;
+    } ) ;
+
+    test.each(
+    [
+        [ "-42n"    , "-" , 42n    ] ,
+        [ "+0xFFn"  , "+" , 255n   ] ,
+        [ "-1_000n" , "-" , 1000n  ]
+    ] )( "unary BigInt %p -> operator %p, argument value %p" ,
+         ( source , operator , expectedValue ) =>
+    {
+        const program = parseToAST( source ) ;
+        const unary   = program.body[ 0 ] ;
+
+        expect( unary.type     ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( unary.operator ).toBe( operator ) ;
+        expect( unary.argument.kind  ).toBe( LiteralKind.BIGINT ) ;
+        expect( unary.argument.value ).toBe( expectedValue ) ;
+    } ) ;
+
+    test.each(
+    [
+        [ "-Infinity" , "-" , "Infinity" ] ,
+        [ "+Infinity" , "+" , "Infinity" ] ,
+        [ "-NaN"      , "-" , "NaN"      ] ,
+        [ "+NaN"      , "+" , "NaN"      ]
+    ] )( "unary numeric keyword %p -> operator %p, argument raw %p" ,
+         ( source , operator , argumentRaw ) =>
+    {
+        const program = parseToAST( source ) ;
+        const unary   = program.body[ 0 ] ;
+
+        expect( unary.type     ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( unary.operator ).toBe( operator ) ;
+        expect( unary.argument.kind ).toBe( LiteralKind.NUMBER ) ;
+        expect( unary.argument.raw  ).toBe( argumentRaw ) ;
+    } ) ;
+
+    test( "unary inside an array" , () =>
+    {
+        const program  = parseToAST( "[1, -2, 3]" ) ;
+        const elements = program.body[ 0 ].elements ;
+
+        expect( elements[ 1 ].type     ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( elements[ 1 ].operator ).toBe( "-" ) ;
+        expect( elements[ 1 ].argument.value ).toBe( 2 ) ;
+    } ) ;
+
+    test( "unary inside an object with Infinity keywords" , () =>
+    {
+        const program = parseToAST( "{ min: -Infinity, max: +Infinity }" ) ;
+        const props   = program.body[ 0 ].properties ;
+
+        expect( props[ 0 ].value.type     ).toBe( NodeType.UNARY_EXPRESSION ) ;
+        expect( props[ 0 ].value.operator ).toBe( "-" ) ;
+        expect( props[ 1 ].value.operator ).toBe( "+" ) ;
+    } ) ;
+
+    test( "unary position reflects the sign token" , () =>
+    {
+        const program = parseToAST( "  -42" ) ;
+        const unary   = program.body[ 0 ] ;
+
+        expect( unary.offset ).toBe( 2 ) ;
+        expect( unary.line   ).toBe( 1 ) ;
+        expect( unary.column ).toBe( 3 ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — unary error cases" , () =>
+{
+    test.each(
+    [
+        "-\"foo\"" ,
+        "+'bar'"   ,
+        "-true"    ,
+        "+null"    ,
+        "-undefined" ,
+        "-[]"      ,
+        "-{}"
+    ] )( "unary on non-numeric %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( source ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unary operator" ) ;
+        expect( caught.message.toLowerCase() ).toContain( "number, bigint, infinity or nan" ) ;
+    } ) ;
+
+    test( "bare sign at end of input is rejected" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "-" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — ParseOptions" , () =>
+{
+    test( "default options leave behavior unchanged" , () =>
+    {
+        const program = parseToAST( "[1, /* c */ 2, // d\n 3,]" ) ;
+        const values  = program.body[ 0 ].elements.map( ( e ) => e.value ) ;
+        expect( values ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "allowComments: false rejects line comments" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1, // c\n 2]" , { allowComments: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "comments are not allowed" ) ;
+    } ) ;
+
+    test( "allowComments: false rejects block comments" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "/* c */ 1" , { allowComments: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "allowComments: false without any comment is fine" , () =>
+    {
+        const program = parseToAST( "[1, 2]" , { allowComments: false } ) ;
+        expect( program.body[ 0 ].elements ).toHaveLength( 2 ) ;
+    } ) ;
+
+    test( "allowTrailingCommas: false rejects trailing comma in array" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[1, 2,]" , { allowTrailingCommas: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "trailing commas are not allowed" ) ;
+    } ) ;
+
+    test( "allowTrailingCommas: false rejects trailing comma in object" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: 1, b: 2, }" , { allowTrailingCommas: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+    } ) ;
+
+    test( "allowTrailingCommas: false still accepts non-trailing commas" , () =>
+    {
+        const program = parseToAST( "[1, 2, 3]" , { allowTrailingCommas: false } ) ;
+        expect( program.body[ 0 ].elements ).toHaveLength( 3 ) ;
+    } ) ;
+
+    test( "partial options preserve other defaults" , () =>
+    {
+        const program = parseToAST( "[1, /* c */ 2]" , { allowTrailingCommas: false } ) ;
+        expect( program.body[ 0 ].elements ).toHaveLength( 2 ) ;
+    } ) ;
+} ) ;

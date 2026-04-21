@@ -194,7 +194,7 @@ itself never evaluates it.
 DataProgram ::= Value
 Value       ::= Null | Undefined | Boolean | Number | BigInt | String
               | Array | Object | UnaryValue
-UnaryValue  ::= ( "+" | "-" ) ( Number | BigInt )
+UnaryValue  ::= ( "+" | "-" ) ( Number | BigInt | "Infinity" | "NaN" )
 ```
 
 A data-mode source contains **exactly one value**.

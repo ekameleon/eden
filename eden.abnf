@@ -68,7 +68,8 @@ value              = null-literal
                    / object
                    / unary-value
 
-unary-value        = ( "+" / "-" ) ( numeric-literal / bigint-literal )
+unary-value        = ( "+" / "-" ) ( numeric-literal / bigint-literal
+                                    / %s"Infinity" / %s"NaN" )
 
 ; --- 3.2-3.3 Eval-mode statements and expressions ------------
 
