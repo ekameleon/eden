@@ -16,8 +16,8 @@
  */
 const ProgramMode = Object.freeze(
 {
-    DATA: "data" ,
-    EVAL: "eval"
+    DATA : "data" ,
+    EVAL : "eval"
 } ) ;
 
 export default ProgramMode ;

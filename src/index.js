@@ -9,16 +9,18 @@
  * @see https://github.com/ekameleon/eden
  */
 
-export { default as EdenError }       from "./errors/EdenError.js" ;
+export { default as EdenError       } from "./errors/EdenError.js" ;
 export { default as EdenSyntaxError } from "./errors/EdenSyntaxError.js" ;
+export { default as EdenTypeError   } from "./errors/EdenTypeError.js" ;
 
 export { default as TokenType } from "./lexer/TokenType.js" ;
-export { default as tokenize }  from "./lexer/tokenize.js" ;
+export { default as tokenize  } from "./lexer/tokenize.js" ;
 
 export { default as LiteralKind } from "./parser/ast/LiteralKind.js" ;
-export { default as NodeType }    from "./parser/ast/NodeType.js" ;
+export { default as NodeType    } from "./parser/ast/NodeType.js" ;
 export { default as ProgramMode } from "./parser/ast/ProgramMode.js" ;
-export { default as parseToAST }  from "./parser/parseToAST.js" ;
+export { default as parse       } from "./parser/parse.js" ;
+export { default as parseToAST  } from "./parser/parseToAST.js" ;
 
 /**
  * Library version, kept in sync with `package.json`.

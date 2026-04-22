@@ -28,16 +28,16 @@
  */
 const TokenType = Object.freeze(
 {
-    PUNCTUATOR:    "Punctuator"    ,
-    KEYWORD:       "Keyword"       ,
-    IDENTIFIER:    "Identifier"    ,
-    NUMBER:        "Number"        ,
-    BIGINT:        "BigInt"        ,
-    STRING:        "String"        ,
-    TEMPLATE:      "Template"      ,
-    LINE_COMMENT:  "LineComment"   ,
-    BLOCK_COMMENT: "BlockComment"  ,
-    EOF:           "EOF"
+    PUNCTUATOR    : "Punctuator"    ,
+    KEYWORD       : "Keyword"       ,
+    IDENTIFIER    : "Identifier"    ,
+    NUMBER        : "Number"        ,
+    BIGINT        : "BigInt"        ,
+    STRING        : "String"        ,
+    TEMPLATE      : "Template"      ,
+    LINE_COMMENT  : "LineComment"   ,
+    BLOCK_COMMENT : "BlockComment"  ,
+    EOF           : "EOF"
 } ) ;
 
 export default TokenType ;

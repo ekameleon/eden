@@ -55,6 +55,7 @@ export default class Parser
         this.#source  = source ;
         this.#options = resolveParseOptions( options ) ;
         this.#index   = 0 ;
+        this.#depth   = 0 ;
     }
 
     /**
@@ -75,11 +76,22 @@ export default class Parser
             return this.#parseEvalProgram() ;
         }
 
+        const firstToken = this.#peek() ;
+        if ( firstToken === undefined || firstToken.type === TokenType.EOF )
+        {
+            if ( this.#options.allowEmptySource )
+            {
+                return createProgram( ProgramMode.DATA , [] ) ;
+            }
+            throw this.#syntaxError( "Expected a value." , firstToken ) ;
+        }
+
         const node = this.#parseValue() ;
         this.#expectEof() ;
         return createProgram( ProgramMode.DATA , [ node ] ) ;
     }
 
+    /** @type {number} */ #depth ;
     /** @type {number} */ #index ;
     /** @type {object} */ #options ;
     /** @type {string} */ #source ;
@@ -116,6 +128,26 @@ export default class Parser
     }
 
     /**
+     * Increments the nesting-depth counter when entering an array or
+     * an object. Enforces `options.maxDepth` and raises
+     * `EdenSyntaxError` at the position of the opening bracket when
+     * the depth is exceeded.
+     *
+     * @param {import("../lexer/createToken.js").Token} openingToken
+     */
+    #enterScope( openingToken )
+    {
+        this.#depth += 1 ;
+        if ( this.#depth > this.#options.maxDepth )
+        {
+            throw this.#syntaxError(
+                `Maximum parsing depth (${ this.#options.maxDepth }) exceeded.` ,
+                openingToken
+            ) ;
+        }
+    }
+
+    /**
      * Asserts that the parser has consumed the entire significant
      * token stream. A trailing `EOF` is expected; anything else
      * raises `EdenSyntaxError`.
@@ -132,6 +164,15 @@ export default class Parser
                 token
             ) ;
         }
+    }
+
+    /**
+     * Decrements the nesting-depth counter when leaving an array or
+     * an object. Paired with `#enterScope()` via `try/finally`.
+     */
+    #leaveScope()
+    {
+        this.#depth -= 1 ;
     }
 
     /**
@@ -229,75 +270,84 @@ export default class Parser
     {
         const open = this.#consume() ;
 
-        const elements = [] ;
+        this.#enterScope( open ) ;
 
-        let next = this.#peek() ;
-
-        if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "]" )
+        try
         {
-            this.#consume() ;
-            return createArrayExpression( elements , open.offset , open.line , open.column ) ;
-        }
+            const elements = [] ;
 
-        while ( true )
-        {
-            next = this.#peek() ;
+            let next = this.#peek() ;
 
-            if ( next === undefined || next.type === TokenType.EOF )
-            {
-                throw this.#syntaxError( "Unterminated array." , open ) ;
-            }
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
-            {
-                throw this.#syntaxError(
-                    "Elisions are not supported in arrays. " +
-                    "Use \"undefined\" or \"null\" explicitly." ,
-                    next
-                ) ;
-            }
-
-            elements.push( this.#parseValue() ) ;
-
-            next = this.#peek() ;
-
-            if ( next === undefined || next.type === TokenType.EOF )
-            {
-                throw this.#syntaxError( "Unterminated array." , open ) ;
-            }
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "]" )
+            if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "]" )
             {
                 this.#consume() ;
                 return createArrayExpression( elements , open.offset , open.line , open.column ) ;
             }
 
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+            while ( true )
             {
-                const commaToken = this.#consume() ;
+                next = this.#peek() ;
 
-                const after = this.#peek() ;
-                if ( after !== undefined &&
-                     after.type === TokenType.PUNCTUATOR &&
-                     after.value === "]" )
+                if ( next === undefined || next.type === TokenType.EOF )
                 {
-                    if ( !this.#options.allowTrailingCommas )
-                    {
-                        throw this.#syntaxError(
-                            "Trailing commas are not allowed." ,
-                            commaToken
-                        ) ;
-                    }
+                    throw this.#syntaxError( "Unterminated array." , open ) ;
+                }
+
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+                {
+                    throw this.#syntaxError(
+                        "Elisions are not supported in arrays. " +
+                        "Use \"undefined\" or \"null\" explicitly." ,
+                        next
+                    ) ;
+                }
+
+                elements.push( this.#parseValue() ) ;
+
+                next = this.#peek() ;
+
+                if ( next === undefined || next.type === TokenType.EOF )
+                {
+                    throw this.#syntaxError( "Unterminated array." , open ) ;
+                }
+
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "]" )
+                {
                     this.#consume() ;
                     return createArrayExpression( elements , open.offset , open.line , open.column ) ;
                 }
-                continue ;
-            }
 
-            throw this.#syntaxError(
-                "Expected \",\" or \"]\" after array element." ,
-                next
-            ) ;
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+                {
+                    const commaToken = this.#consume() ;
+
+                    const after = this.#peek() ;
+                    if ( after !== undefined &&
+                         after.type === TokenType.PUNCTUATOR &&
+                         after.value === "]" )
+                    {
+                        if ( !this.#options.allowTrailingCommas )
+                        {
+                            throw this.#syntaxError(
+                                "Trailing commas are not allowed." ,
+                                commaToken
+                            ) ;
+                        }
+                        this.#consume() ;
+                        return createArrayExpression( elements , open.offset , open.line , open.column ) ;
+                    }
+                    continue ;
+                }
+
+                throw this.#syntaxError(
+                    "Expected \",\" or \"]\" after array element." ,
+                    next
+                ) ;
+            }
+        }
+        finally
+        {
+            this.#leaveScope() ;
         }
     }
 
@@ -343,6 +393,14 @@ export default class Parser
      */
     #parseLiteralBigInt( token )
     {
+        if ( !this.#options.allowBigInt )
+        {
+            throw this.#syntaxError(
+                "BigInt literals are not allowed." ,
+                token
+            ) ;
+        }
+
         return createLiteral(
             parseBigIntLiteral( token.value ) ,
             token.value ,
@@ -423,8 +481,26 @@ export default class Parser
      */
     #parseLiteralString( token )
     {
+        if ( !this.#options.allowSingleQuotes && token.value.startsWith( "'" ) )
+        {
+            throw this.#syntaxError(
+                "Single-quoted strings are not allowed." ,
+                token
+            ) ;
+        }
+
+        const value = parseStringLiteral( token.value ) ;
+
+        if ( value.length > this.#options.maxStringLength )
+        {
+            throw this.#syntaxError(
+                `String literal exceeds maxStringLength (${ this.#options.maxStringLength }).` ,
+                token
+            ) ;
+        }
+
         return createLiteral(
-            parseStringLiteral( token.value ) ,
+            value ,
             token.value ,
             LiteralKind.STRING ,
             token.offset ,
@@ -443,8 +519,26 @@ export default class Parser
      */
     #parseLiteralTemplate( token )
     {
+        if ( !this.#options.allowTemplates )
+        {
+            throw this.#syntaxError(
+                "Template literals are not allowed." ,
+                token
+            ) ;
+        }
+
+        const value = parseStringLiteral( token.value ) ;
+
+        if ( value.length > this.#options.maxStringLength )
+        {
+            throw this.#syntaxError(
+                `Template literal exceeds maxStringLength (${ this.#options.maxStringLength }).` ,
+                token
+            ) ;
+        }
+
         return createLiteral(
-            parseStringLiteral( token.value ) ,
+            value ,
             token.value ,
             LiteralKind.TEMPLATE ,
             token.offset ,
@@ -683,189 +777,212 @@ export default class Parser
     {
         const open = this.#consume() ;
 
-        const properties = [] ;
+        this.#enterScope( open ) ;
 
-        let next = this.#peek() ;
-
-        if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "}" )
+        try
         {
-            this.#consume() ;
-            return createObjectExpression( properties , open.offset , open.line , open.column ) ;
-        }
+            const properties = [] ;
+            const staticKeys = new Set() ;
 
-        while ( true )
-        {
-            next = this.#peek() ;
+            let next = this.#peek() ;
 
-            if ( next === undefined || next.type === TokenType.EOF )
+            if ( next !== undefined && next.type === TokenType.PUNCTUATOR && next.value === "}" )
             {
-                throw this.#syntaxError( "Unterminated object." , open ) ;
+                this.#consume() ;
+                return createObjectExpression( properties , open.offset , open.line , open.column ) ;
             }
 
-            const isEval = this.#options.mode === ProgramMode.EVAL ;
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "[" )
+            while ( true )
             {
-                if ( !isEval )
-                {
-                    throw this.#syntaxError(
-                        "Computed property keys are not allowed in data mode." ,
-                        next
-                    ) ;
-                }
+                next = this.#peek() ;
 
-                const openBracket = this.#consume() ;
-                const computedKey = this.#parseValue() ;
-
-                const closeBracket = this.#peek() ;
-                if ( closeBracket === undefined ||
-                     closeBracket.type !== TokenType.PUNCTUATOR ||
-                     closeBracket.value !== "]" )
-                {
-                    throw this.#syntaxError(
-                        "Expected \"]\" after computed property key." ,
-                        closeBracket
-                    ) ;
-                }
-                this.#consume() ;
-
-                const colonToken = this.#peek() ;
-                if ( colonToken === undefined ||
-                     colonToken.type !== TokenType.PUNCTUATOR ||
-                     colonToken.value !== ":" )
-                {
-                    throw this.#syntaxError(
-                        "Expected \":\" after computed property key." ,
-                        colonToken
-                    ) ;
-                }
-                this.#consume() ;
-
-                const computedValue = this.#parseValue() ;
-
-                properties.push( createProperty(
-                    computedKey ,
-                    computedValue ,
-                    false ,
-                    true ,
-                    openBracket.offset ,
-                    openBracket.line ,
-                    openBracket.column
-                ) ) ;
-            }
-            else
-            {
-                if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
-                {
-                    throw this.#syntaxError(
-                        "Expected a property key but found \",\"." ,
-                        next
-                    ) ;
-                }
-
-                const keyStart = next ;
-                const key      = this.#parsePropertyKey() ;
-
-                const afterKey = this.#peek() ;
-
-                if ( afterKey === undefined || afterKey.type === TokenType.EOF )
+                if ( next === undefined || next.type === TokenType.EOF )
                 {
                     throw this.#syntaxError( "Unterminated object." , open ) ;
                 }
 
-                if ( afterKey.type !== TokenType.PUNCTUATOR || afterKey.value !== ":" )
+                const isEval = this.#options.mode === ProgramMode.EVAL ;
+
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "[" )
                 {
-                    if ( key.type === NodeType.IDENTIFIER && isEval )
+                    if ( !isEval )
                     {
-                        const shorthandValue = createIdentifier(
-                            key.name ,
-                            key.offset ,
-                            key.line ,
-                            key.column
+                        throw this.#syntaxError(
+                            "Computed property keys are not allowed in data mode." ,
+                            next
                         ) ;
+                    }
+
+                    const openBracket = this.#consume() ;
+                    const computedKey = this.#parseValue() ;
+
+                    const closeBracket = this.#peek() ;
+                    if ( closeBracket === undefined ||
+                         closeBracket.type !== TokenType.PUNCTUATOR ||
+                         closeBracket.value !== "]" )
+                    {
+                        throw this.#syntaxError(
+                            "Expected \"]\" after computed property key." ,
+                            closeBracket
+                        ) ;
+                    }
+                    this.#consume() ;
+
+                    const colonToken = this.#peek() ;
+                    if ( colonToken === undefined ||
+                         colonToken.type !== TokenType.PUNCTUATOR ||
+                         colonToken.value !== ":" )
+                    {
+                        throw this.#syntaxError(
+                            "Expected \":\" after computed property key." ,
+                            colonToken
+                        ) ;
+                    }
+                    this.#consume() ;
+
+                    const computedValue = this.#parseValue() ;
+
+                    properties.push( createProperty(
+                        computedKey ,
+                        computedValue ,
+                        false ,
+                        true ,
+                        openBracket.offset ,
+                        openBracket.line ,
+                        openBracket.column
+                    ) ) ;
+                }
+                else
+                {
+                    if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+                    {
+                        throw this.#syntaxError(
+                            "Expected a property key but found \",\"." ,
+                            next
+                        ) ;
+                    }
+
+                    const keyStart = next ;
+                    const key      = this.#parsePropertyKey() ;
+
+                    if ( key.type === NodeType.IDENTIFIER && !this.#options.allowUnquotedKeys )
+                    {
+                        throw this.#syntaxError(
+                            "Unquoted property keys are not allowed." ,
+                            keyStart
+                        ) ;
+                    }
+
+                    const afterKey = this.#peek() ;
+
+                    if ( afterKey === undefined || afterKey.type === TokenType.EOF )
+                    {
+                        throw this.#syntaxError( "Unterminated object." , open ) ;
+                    }
+
+                    if ( afterKey.type !== TokenType.PUNCTUATOR || afterKey.value !== ":" )
+                    {
+                        if ( key.type === NodeType.IDENTIFIER && isEval )
+                        {
+                            const shorthandValue = createIdentifier(
+                                key.name ,
+                                key.offset ,
+                                key.line ,
+                                key.column
+                            ) ;
+
+                            this.#trackStaticKey( key , staticKeys , keyStart ) ;
+
+                            properties.push( createProperty(
+                                key ,
+                                shorthandValue ,
+                                true ,
+                                false ,
+                                key.offset ,
+                                key.line ,
+                                key.column
+                            ) ) ;
+                        }
+                        else
+                        {
+                            if ( key.type === NodeType.IDENTIFIER )
+                            {
+                                throw this.#syntaxError(
+                                    "Shorthand properties are not allowed in data mode. " +
+                                    "Use the long form \"key: value\"." ,
+                                    keyStart
+                                ) ;
+                            }
+                            throw this.#syntaxError(
+                                "Expected \":\" after property key." ,
+                                afterKey
+                            ) ;
+                        }
+                    }
+                    else
+                    {
+                        this.#consume() ;
+
+                        const value = this.#parseValue() ;
+
+                        this.#trackStaticKey( key , staticKeys , keyStart ) ;
+
                         properties.push( createProperty(
                             key ,
-                            shorthandValue ,
-                            true ,
+                            value ,
+                            false ,
                             false ,
                             key.offset ,
                             key.line ,
                             key.column
                         ) ) ;
                     }
-                    else
-                    {
-                        if ( key.type === NodeType.IDENTIFIER )
-                        {
-                            throw this.#syntaxError(
-                                "Shorthand properties are not allowed in data mode. " +
-                                "Use the long form \"key: value\"." ,
-                                keyStart
-                            ) ;
-                        }
-                        throw this.#syntaxError(
-                            "Expected \":\" after property key." ,
-                            afterKey
-                        ) ;
-                    }
                 }
-                else
+
+                next = this.#peek() ;
+
+                if ( next === undefined || next.type === TokenType.EOF )
                 {
-                    this.#consume() ;
-
-                    const value = this.#parseValue() ;
-
-                    properties.push( createProperty(
-                        key ,
-                        value ,
-                        false ,
-                        false ,
-                        key.offset ,
-                        key.line ,
-                        key.column
-                    ) ) ;
+                    throw this.#syntaxError( "Unterminated object." , open ) ;
                 }
-            }
 
-            next = this.#peek() ;
-
-            if ( next === undefined || next.type === TokenType.EOF )
-            {
-                throw this.#syntaxError( "Unterminated object." , open ) ;
-            }
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "}" )
-            {
-                this.#consume() ;
-                return createObjectExpression( properties , open.offset , open.line , open.column ) ;
-            }
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
-            {
-                const commaToken = this.#consume() ;
-
-                const after = this.#peek() ;
-                if ( after !== undefined &&
-                     after.type === TokenType.PUNCTUATOR &&
-                     after.value === "}" )
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "}" )
                 {
-                    if ( !this.#options.allowTrailingCommas )
-                    {
-                        throw this.#syntaxError(
-                            "Trailing commas are not allowed." ,
-                            commaToken
-                        ) ;
-                    }
                     this.#consume() ;
                     return createObjectExpression( properties , open.offset , open.line , open.column ) ;
                 }
-                continue ;
-            }
 
-            throw this.#syntaxError(
-                "Expected \",\" or \"}\" after property value." ,
-                next
-            ) ;
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+                {
+                    const commaToken = this.#consume() ;
+
+                    const after = this.#peek() ;
+                    if ( after !== undefined &&
+                         after.type === TokenType.PUNCTUATOR &&
+                         after.value === "}" )
+                    {
+                        if ( !this.#options.allowTrailingCommas )
+                        {
+                            throw this.#syntaxError(
+                                "Trailing commas are not allowed." ,
+                                commaToken
+                            ) ;
+                        }
+                        this.#consume() ;
+                        return createObjectExpression( properties , open.offset , open.line , open.column ) ;
+                    }
+                    continue ;
+                }
+
+                throw this.#syntaxError(
+                    "Expected \",\" or \"}\" after property value." ,
+                    next
+                ) ;
+            }
+        }
+        finally
+        {
+            this.#leaveScope() ;
         }
     }
 
@@ -1140,6 +1257,51 @@ export default class Parser
             }
             this.#index += 1 ;
         }
+    }
+
+    /**
+     * Tracks a static (non-computed) property key for duplicate
+     * detection. When `options.strictMode` is `true`, a second
+     * occurrence of the same key raises `EdenSyntaxError`.
+     *
+     * Only `Identifier` and `Literal` keys participate; computed
+     * keys are skipped because their value is only known at
+     * evaluation time.
+     *
+     * @param {import("./ast/createIdentifier.js").Identifier |
+     *         import("./ast/createLiteral.js").Literal}            key
+     * @param {Set<string>}                                          seen
+     * @param {import("../lexer/createToken.js").Token}              locationToken
+     */
+    #trackStaticKey( key , seen , locationToken )
+    {
+        let keyValue ;
+        if ( key.type === NodeType.IDENTIFIER )
+        {
+            keyValue = key.name ;
+        }
+        else if ( key.type === NodeType.LITERAL )
+        {
+            keyValue = String( key.value ) ;
+        }
+        else
+        {
+            return ;
+        }
+
+        if ( seen.has( keyValue ) )
+        {
+            if ( this.#options.strictMode )
+            {
+                throw this.#syntaxError(
+                    `Duplicate key "${ keyValue }" in strict mode.` ,
+                    locationToken
+                ) ;
+            }
+            return ;
+        }
+
+        seen.add( keyValue ) ;
     }
 
     /**

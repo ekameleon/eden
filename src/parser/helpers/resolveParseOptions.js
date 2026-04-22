@@ -18,6 +18,7 @@
  * @property {boolean}   [allowUnquotedKeys=true]
  * @property {boolean}   [allowTemplates=true]
  * @property {boolean}   [allowBigInt=true]
+ * @property {boolean}   [allowEmptySource=true]
  * @property {boolean}   [strictMode=true]
  * @property {number}    [maxDepth=1024]
  * @property {number}    [maxStringLength=Infinity]
@@ -25,16 +26,17 @@
 
 const DEFAULTS = Object.freeze(
 {
-    mode:                "data"    ,
-    allowComments:       true      ,
-    allowTrailingCommas: true      ,
-    allowSingleQuotes:   true      ,
-    allowUnquotedKeys:   true      ,
-    allowTemplates:      true      ,
-    allowBigInt:         true      ,
-    strictMode:          true      ,
-    maxDepth:            1024      ,
-    maxStringLength:     Infinity
+    mode                : "data"    ,
+    allowComments       : true      ,
+    allowTrailingCommas : true      ,
+    allowSingleQuotes   : true      ,
+    allowUnquotedKeys   : true      ,
+    allowTemplates      : true      ,
+    allowBigInt         : true      ,
+    allowEmptySource    : true      ,
+    strictMode          : true      ,
+    maxDepth            : 1024      ,
+    maxStringLength     : Infinity
 } ) ;
 
 /**

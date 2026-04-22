@@ -161,7 +161,7 @@ so please keep them minimal, focused on one feature each, and stable.
 
 - [x] Specification (grammar + semantics)
 - [x] Lexer
-- [ ] Parser + AST
+- [x] Parser + AST
 - [ ] Serializer
 - [ ] `parse` / `stringify` public API
 - [ ] Evaluator with scope & security policy

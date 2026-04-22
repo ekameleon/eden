@@ -22,13 +22,13 @@
  */
 const LiteralKind = Object.freeze(
 {
-    NULL:      "null"      ,
-    UNDEFINED: "undefined" ,
-    BOOLEAN:   "boolean"   ,
-    NUMBER:    "number"    ,
-    BIGINT:    "bigint"    ,
-    STRING:    "string"    ,
-    TEMPLATE:  "template"
+    NULL      : "null"      ,
+    UNDEFINED : "undefined" ,
+    BOOLEAN   : "boolean"   ,
+    NUMBER    : "number"    ,
+    BIGINT    : "bigint"    ,
+    STRING    : "string"    ,
+    TEMPLATE  : "template"
 } ) ;
 
 export default LiteralKind ;

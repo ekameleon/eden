@@ -11,12 +11,14 @@
 import { describe , test , expect } from "bun:test" ;
 
 import {
+    parse ,
     parseToAST ,
     NodeType ,
     LiteralKind ,
     ProgramMode ,
     EdenError ,
-    EdenSyntaxError
+    EdenSyntaxError ,
+    EdenTypeError
 }
 from "../src/index.js" ;
 
@@ -104,12 +106,25 @@ describe( "parser — value keywords" , () =>
 
 describe( "parser — error cases" , () =>
 {
-    test( "empty source throws \"Expected a value.\"" , () =>
+    test( "empty source produces an empty body by default (allowEmptySource)" , () =>
+    {
+        const program = parseToAST( "" ) ;
+        expect( program.type ).toBe( NodeType.PROGRAM ) ;
+        expect( program.body ).toEqual( [] ) ;
+    } ) ;
+
+    test( "whitespace-only source produces an empty body by default" , () =>
+    {
+        const program = parseToAST( "   \n  \t " ) ;
+        expect( program.body ).toEqual( [] ) ;
+    } ) ;
+
+    test( "allowEmptySource: false rejects an empty source" , () =>
     {
         let caught = null ;
         try
         {
-            parseToAST( "" ) ;
+            parseToAST( "" , { allowEmptySource: false } ) ;
         }
         catch ( error )
         {
@@ -118,22 +133,6 @@ describe( "parser — error cases" , () =>
 
         expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
         expect( caught ).toBeInstanceOf( EdenError ) ;
-        expect( caught.message.toLowerCase() ).toContain( "expected a value" ) ;
-    } ) ;
-
-    test( "whitespace-only source throws \"Expected a value.\"" , () =>
-    {
-        let caught = null ;
-        try
-        {
-            parseToAST( "   \n  \t " ) ;
-        }
-        catch ( error )
-        {
-            caught = error ;
-        }
-
-        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
         expect( caught.message.toLowerCase() ).toContain( "expected a value" ) ;
     } ) ;
 
@@ -674,9 +673,9 @@ describe( "parser — objects" , () =>
         expect( props[ 1 ].value.value ).toBe( 2 ) ;
     } ) ;
 
-    test( "duplicate keys are preserved in order (AST level)" , () =>
+    test( "duplicate keys are preserved in order (AST level, non-strict)" , () =>
     {
-        const program = parseToAST( "{ a: 1, a: 2 }" ) ;
+        const program = parseToAST( "{ a: 1, a: 2 }" , { strictMode: false } ) ;
         const props   = program.body[ 0 ].properties ;
         expect( props ).toHaveLength( 2 ) ;
         expect( props[ 0 ].value.value ).toBe( 1 ) ;
@@ -1638,5 +1637,265 @@ describe( "parser — eval mode: shorthand and computed properties" , () =>
 
         expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
         expect( caught.message.toLowerCase() ).toContain( "computed property keys are not allowed" ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — ParseOptions filtering (full coverage)" , () =>
+{
+    test( "allowSingleQuotes: false rejects single-quoted strings" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "'foo'" , { allowSingleQuotes: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "single-quoted strings are not allowed" ) ;
+    } ) ;
+
+    test( "allowSingleQuotes: false still accepts double-quoted strings" , () =>
+    {
+        const program = parseToAST( "\"foo\"" , { allowSingleQuotes: false } ) ;
+        expect( program.body[ 0 ].value ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "allowUnquotedKeys: false rejects identifier keys" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ foo: 1 }" , { allowUnquotedKeys: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "unquoted property keys are not allowed" ) ;
+    } ) ;
+
+    test( "allowUnquotedKeys: false still accepts string keys" , () =>
+    {
+        const program = parseToAST( "{ \"foo\": 1 }" , { allowUnquotedKeys: false } ) ;
+        expect( program.body[ 0 ].properties[ 0 ].key.value ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "allowTemplates: false rejects template literals" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "`foo`" , { allowTemplates: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "template literals are not allowed" ) ;
+    } ) ;
+
+    test( "allowBigInt: false rejects BigInt literals" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "42n" , { allowBigInt: false } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "bigint literals are not allowed" ) ;
+    } ) ;
+
+    test( "strictMode: true (default) rejects duplicate keys" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: 1, a: 2 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "duplicate key" ) ;
+    } ) ;
+
+    test( "maxDepth enforces nesting limit on arrays" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "[[[[]]]]" , { maxDepth: 2 } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "maximum parsing depth" ) ;
+    } ) ;
+
+    test( "maxDepth enforces nesting limit on objects" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ a: { b: { c: 1 } } }" , { maxDepth: 2 } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "maximum parsing depth" ) ;
+    } ) ;
+
+    test( "maxStringLength rejects strings above the limit" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "\"hello world\"" , { maxStringLength: 5 } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "maxstringlength" ) ;
+    } ) ;
+
+    test( "maxStringLength rejects templates above the limit" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "`hello world`" , { maxStringLength: 5 } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "maxstringlength" ) ;
+    } ) ;
+} ) ;
+
+describe( "eden.parse (public API)" , () =>
+{
+    test( "parse(\"null\") returns null" , () =>
+    {
+        expect( parse( "null" ) ).toBe( null ) ;
+    } ) ;
+
+    test( "parse(\"42\") returns 42" , () =>
+    {
+        expect( parse( "42" ) ).toBe( 42 ) ;
+    } ) ;
+
+    test( "parse(\"[1, 2, 3]\") returns the array" , () =>
+    {
+        expect( parse( "[1, 2, 3]" ) ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "parse(\"{ a: 1, b: 2 }\") returns the object" , () =>
+    {
+        expect( parse( "{ a: 1, b: 2 }" ) ).toEqual( { a: 1 , b: 2 } ) ;
+    } ) ;
+
+    test( "parse with nested structures" , () =>
+    {
+        const source = "{ tags: [\"dev\", \"maker\",], active: true, count: 42 }" ;
+        expect( parse( source ) ).toEqual(
+        {
+            tags:   [ "dev" , "maker" ] ,
+            active: true ,
+            count:  42
+        } ) ;
+    } ) ;
+
+    test( "parse resolves escapes in strings" , () =>
+    {
+        expect( parse( "\"a\\nb\"" ) ).toBe( "a\nb" ) ;
+    } ) ;
+
+    test( "parse resolves BigInt" , () =>
+    {
+        expect( parse( "42n" ) ).toBe( 42n ) ;
+    } ) ;
+
+    test( "parse applies unary on numbers" , () =>
+    {
+        expect( parse( "-1.5" ) ).toBe( -1.5 ) ;
+    } ) ;
+
+    test( "parse applies unary on -Infinity" , () =>
+    {
+        expect( parse( "-Infinity" ) ).toBe( Number.NEGATIVE_INFINITY ) ;
+    } ) ;
+
+    test( "parse applies unary on -NaN (still NaN)" , () =>
+    {
+        expect( Number.isNaN( parse( "-NaN" ) ) ).toBe( true ) ;
+    } ) ;
+
+    test( "parse applies unary on negative BigInt" , () =>
+    {
+        expect( parse( "-42n" ) ).toBe( -42n ) ;
+    } ) ;
+
+    test( "parse with duplicate keys in non-strict mode returns last value" , () =>
+    {
+        expect( parse( "{ a: 1, a: 2 }" , { strictMode: false } ) ).toEqual( { a: 2 } ) ;
+    } ) ;
+
+    test( "parse of empty source returns undefined" , () =>
+    {
+        expect( parse( "" ) ).toBeUndefined() ;
+    } ) ;
+
+    test( "parse rejects eval mode with EdenTypeError" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parse( "foo" , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+        expect( caught ).toBeInstanceOf( EdenTypeError ) ;
+    } ) ;
+
+    test( "parse on a mixed realistic source" , () =>
+    {
+        const source =
+            "{\n" +
+            "    name: \"Marc\",\n" +
+            "    tags: [\"dev\", \"maker\",],\n" +
+            "    big: 1_000_000n,\n" +
+            "    math: { min: -Infinity, max: +Infinity, zero: 0 },\n" +
+            "    // comment\n" +
+            "    active: true,\n" +
+            "}" ;
+
+        expect( parse( source ) ).toEqual(
+        {
+            name:   "Marc" ,
+            tags:   [ "dev" , "maker" ] ,
+            big:    1000000n ,
+            math:   { min: Number.NEGATIVE_INFINITY , max: Number.POSITIVE_INFINITY , zero: 0 } ,
+            active: true
+        } ) ;
     } ) ;
 } ) ;

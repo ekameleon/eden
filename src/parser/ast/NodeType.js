@@ -29,17 +29,17 @@
  */
 const NodeType = Object.freeze(
 {
-    PROGRAM:              "Program"              ,
-    LITERAL:              "Literal"              ,
-    IDENTIFIER:           "Identifier"           ,
-    MEMBER_EXPRESSION:    "MemberExpression"     ,
-    ARRAY_EXPRESSION:     "ArrayExpression"      ,
-    OBJECT_EXPRESSION:    "ObjectExpression"     ,
-    PROPERTY:             "Property"             ,
-    UNARY_EXPRESSION:     "UnaryExpression"      ,
-    CALL_EXPRESSION:      "CallExpression"       ,
-    NEW_EXPRESSION:       "NewExpression"        ,
-    ASSIGNMENT_STATEMENT: "AssignmentStatement"
+    PROGRAM              : "Program"              ,
+    LITERAL              : "Literal"              ,
+    IDENTIFIER           : "Identifier"           ,
+    MEMBER_EXPRESSION    : "MemberExpression"     ,
+    ARRAY_EXPRESSION     : "ArrayExpression"      ,
+    OBJECT_EXPRESSION    : "ObjectExpression"     ,
+    PROPERTY             : "Property"             ,
+    UNARY_EXPRESSION     : "UnaryExpression"      ,
+    CALL_EXPRESSION      : "CallExpression"       ,
+    NEW_EXPRESSION       : "NewExpression"        ,
+    ASSIGNMENT_STATEMENT : "AssignmentStatement"
 } ) ;
 
 export default NodeType ;
