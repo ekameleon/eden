@@ -1403,3 +1403,240 @@ describe( "parser — eval mode: mode routing and errors" , () =>
         expect( caught.message.toLowerCase() ).toContain( "unterminated argument list" ) ;
     } ) ;
 } ) ;
+
+describe( "parser — eval mode: statements" , () =>
+{
+    test( "single expression statement" , () =>
+    {
+        const program = parseToAST( "foo" , { mode: "eval" } ) ;
+        expect( program.mode ).toBe( ProgramMode.EVAL ) ;
+        expect( program.body ).toHaveLength( 1 ) ;
+        expect( program.body[ 0 ].type ).toBe( NodeType.IDENTIFIER ) ;
+    } ) ;
+
+    test( "multiple statements separated by semicolons" , () =>
+    {
+        const program = parseToAST( "foo; bar; baz" , { mode: "eval" } ) ;
+        expect( program.body ).toHaveLength( 3 ) ;
+        expect( program.body.map( ( s ) => s.name ) ).toEqual( [ "foo" , "bar" , "baz" ] ) ;
+    } ) ;
+
+    test( "multiple statements without explicit separators" , () =>
+    {
+        const program = parseToAST( "foo bar" , { mode: "eval" } ) ;
+        expect( program.body ).toHaveLength( 2 ) ;
+    } ) ;
+
+    test( "trailing semicolon is tolerated" , () =>
+    {
+        const program = parseToAST( "foo;" , { mode: "eval" } ) ;
+        expect( program.body ).toHaveLength( 1 ) ;
+    } ) ;
+
+    test( "empty eval program" , () =>
+    {
+        const program = parseToAST( "" , { mode: "eval" } ) ;
+        expect( program.body ).toEqual( [] ) ;
+    } ) ;
+
+    test( "mix of expression and assignment statements" , () =>
+    {
+        const program = parseToAST( "foo = 1; bar" , { mode: "eval" } ) ;
+        expect( program.body ).toHaveLength( 2 ) ;
+        expect( program.body[ 0 ].type ).toBe( NodeType.ASSIGNMENT_STATEMENT ) ;
+        expect( program.body[ 1 ].type ).toBe( NodeType.IDENTIFIER ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: assignments" , () =>
+{
+    test( "simple assignment to an identifier" , () =>
+    {
+        const program = parseToAST( "foo = 1" , { mode: "eval" } ) ;
+        const stmt    = program.body[ 0 ] ;
+
+        expect( stmt.type        ).toBe( NodeType.ASSIGNMENT_STATEMENT ) ;
+        expect( stmt.target.type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( stmt.target.name ).toBe( "foo" ) ;
+        expect( stmt.value.type  ).toBe( NodeType.LITERAL ) ;
+        expect( stmt.value.value ).toBe( 1 ) ;
+    } ) ;
+
+    test( "assignment to a member path" , () =>
+    {
+        const program = parseToAST( "foo.bar = 1" , { mode: "eval" } ) ;
+        const stmt    = program.body[ 0 ] ;
+
+        expect( stmt.type        ).toBe( NodeType.ASSIGNMENT_STATEMENT ) ;
+        expect( stmt.target.type ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+    } ) ;
+
+    test( "assignment to a bracket member" , () =>
+    {
+        const program = parseToAST( "foo[\"x\"] = 1" , { mode: "eval" } ) ;
+        const stmt    = program.body[ 0 ] ;
+
+        expect( stmt.target.type     ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( stmt.target.computed ).toBe( true ) ;
+    } ) ;
+
+    test( "assignment to a chained path" , () =>
+    {
+        const program = parseToAST( "foo.bar.baz = 1" , { mode: "eval" } ) ;
+        const stmt    = program.body[ 0 ] ;
+
+        expect( stmt.target.type          ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+        expect( stmt.target.property.name ).toBe( "baz" ) ;
+    } ) ;
+
+    test( "assignment value is a complex expression" , () =>
+    {
+        const program = parseToAST( "a = foo.bar(1, 2)" , { mode: "eval" } ) ;
+        const stmt    = program.body[ 0 ] ;
+
+        expect( stmt.value.type ).toBe( NodeType.CALL_EXPRESSION ) ;
+    } ) ;
+
+    test( "multiple assignments" , () =>
+    {
+        const program = parseToAST( "a = 1; b = 2" , { mode: "eval" } ) ;
+        expect( program.body ).toHaveLength( 2 ) ;
+        for ( const stmt of program.body )
+        {
+            expect( stmt.type ).toBe( NodeType.ASSIGNMENT_STATEMENT ) ;
+        }
+    } ) ;
+
+    test.each(
+    [
+        "1 = 2"          ,
+        "\"s\" = 1"      ,
+        "foo() = 1"      ,
+        "[] = 1"         ,
+        "new Foo = 1"
+    ] )( "invalid assignment target %p is rejected" , ( source ) =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( source , { mode: "eval" } ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "invalid assignment target" ) ;
+    } ) ;
+} ) ;
+
+describe( "parser — eval mode: shorthand and computed properties" , () =>
+{
+    test( "shorthand property produces shorthand: true" , () =>
+    {
+        const program  = parseToAST( "{ foo }" , { mode: "eval" } ) ;
+        const props    = program.body[ 0 ].properties ;
+
+        expect( props ).toHaveLength( 1 ) ;
+        const property = props[ 0 ] ;
+        expect( property.type       ).toBe( NodeType.PROPERTY ) ;
+        expect( property.shorthand  ).toBe( true ) ;
+        expect( property.computed   ).toBe( false ) ;
+        expect( property.key.type   ).toBe( NodeType.IDENTIFIER ) ;
+        expect( property.key.name   ).toBe( "foo" ) ;
+        expect( property.value.type ).toBe( NodeType.IDENTIFIER ) ;
+        expect( property.value.name ).toBe( "foo" ) ;
+    } ) ;
+
+    test( "shorthand key and value are distinct node instances" , () =>
+    {
+        const program  = parseToAST( "{ foo }" , { mode: "eval" } ) ;
+        const property = program.body[ 0 ].properties[ 0 ] ;
+        expect( property.key ).not.toBe( property.value ) ;
+    } ) ;
+
+    test( "multiple shorthand properties" , () =>
+    {
+        const program = parseToAST( "{ foo, bar, baz }" , { mode: "eval" } ) ;
+        const props   = program.body[ 0 ].properties ;
+
+        expect( props ).toHaveLength( 3 ) ;
+        expect( props.every( ( p ) => p.shorthand === true ) ).toBe( true ) ;
+        expect( props.map( ( p ) => p.key.name ) ).toEqual( [ "foo" , "bar" , "baz" ] ) ;
+    } ) ;
+
+    test( "mixed shorthand and long-form properties" , () =>
+    {
+        const program = parseToAST( "{ foo, name: \"Marc\", age }" , { mode: "eval" } ) ;
+        const props   = program.body[ 0 ].properties ;
+
+        expect( props[ 0 ].shorthand ).toBe( true ) ;
+        expect( props[ 1 ].shorthand ).toBe( false ) ;
+        expect( props[ 2 ].shorthand ).toBe( true ) ;
+    } ) ;
+
+    test( "computed property with a string literal key" , () =>
+    {
+        const program  = parseToAST( "{ [\"a\"]: 1 }" , { mode: "eval" } ) ;
+        const property = program.body[ 0 ].properties[ 0 ] ;
+
+        expect( property.computed  ).toBe( true ) ;
+        expect( property.shorthand ).toBe( false ) ;
+        expect( property.key.type  ).toBe( NodeType.LITERAL ) ;
+        expect( property.key.value ).toBe( "a" ) ;
+    } ) ;
+
+    test( "computed property with an expression key" , () =>
+    {
+        const program  = parseToAST( "{ [foo.bar]: 1 }" , { mode: "eval" } ) ;
+        const property = program.body[ 0 ].properties[ 0 ] ;
+
+        expect( property.computed ).toBe( true ) ;
+        expect( property.key.type ).toBe( NodeType.MEMBER_EXPRESSION ) ;
+    } ) ;
+
+    test( "computed and shorthand can coexist in the same object" , () =>
+    {
+        const program = parseToAST( "{ x: 1, [y]: 2, z }" , { mode: "eval" } ) ;
+        const props   = program.body[ 0 ].properties ;
+
+        expect( props ).toHaveLength( 3 ) ;
+        expect( props[ 0 ].computed  ).toBe( false ) ;
+        expect( props[ 0 ].shorthand ).toBe( false ) ;
+        expect( props[ 1 ].computed  ).toBe( true ) ;
+        expect( props[ 2 ].shorthand ).toBe( true ) ;
+    } ) ;
+
+    test( "shorthand still rejected in data mode" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ foo }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "shorthand" ) ;
+    } ) ;
+
+    test( "computed still rejected in data mode" , () =>
+    {
+        let caught = null ;
+        try
+        {
+            parseToAST( "{ [x]: 1 }" ) ;
+        }
+        catch ( error )
+        {
+            caught = error ;
+        }
+
+        expect( caught ).toBeInstanceOf( EdenSyntaxError ) ;
+        expect( caught.message.toLowerCase() ).toContain( "computed property keys are not allowed" ) ;
+    } ) ;
+} ) ;

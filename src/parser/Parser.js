@@ -15,18 +15,19 @@
  * next sub-steps.
  */
 
-import EdenSyntaxError        from "../errors/EdenSyntaxError.js" ;
-import TokenType              from "../lexer/TokenType.js" ;
-import createArrayExpression  from "./ast/createArrayExpression.js" ;
-import createCallExpression   from "./ast/createCallExpression.js" ;
-import createIdentifier       from "./ast/createIdentifier.js" ;
-import createLiteral          from "./ast/createLiteral.js" ;
-import createMemberExpression from "./ast/createMemberExpression.js" ;
-import createNewExpression    from "./ast/createNewExpression.js" ;
-import createObjectExpression from "./ast/createObjectExpression.js" ;
-import createProgram          from "./ast/createProgram.js" ;
-import createProperty         from "./ast/createProperty.js" ;
-import createUnaryExpression  from "./ast/createUnaryExpression.js" ;
+import EdenSyntaxError           from "../errors/EdenSyntaxError.js" ;
+import TokenType                 from "../lexer/TokenType.js" ;
+import createArrayExpression     from "./ast/createArrayExpression.js" ;
+import createAssignmentStatement from "./ast/createAssignmentStatement.js" ;
+import createCallExpression      from "./ast/createCallExpression.js" ;
+import createIdentifier          from "./ast/createIdentifier.js" ;
+import createLiteral             from "./ast/createLiteral.js" ;
+import createMemberExpression    from "./ast/createMemberExpression.js" ;
+import createNewExpression       from "./ast/createNewExpression.js" ;
+import createObjectExpression    from "./ast/createObjectExpression.js" ;
+import createProgram             from "./ast/createProgram.js" ;
+import createProperty            from "./ast/createProperty.js" ;
+import createUnaryExpression     from "./ast/createUnaryExpression.js" ;
 import LiteralKind            from "./ast/LiteralKind.js" ;
 import NodeType               from "./ast/NodeType.js" ;
 import ProgramMode            from "./ast/ProgramMode.js" ;
@@ -69,12 +70,14 @@ export default class Parser
      */
     parse()
     {
+        if ( this.#options.mode === ProgramMode.EVAL )
+        {
+            return this.#parseEvalProgram() ;
+        }
+
         const node = this.#parseValue() ;
         this.#expectEof() ;
-        const mode = this.#options.mode === ProgramMode.EVAL
-            ? ProgramMode.EVAL
-            : ProgramMode.DATA ;
-        return createProgram( mode , [ node ] ) ;
+        return createProgram( ProgramMode.DATA , [ node ] ) ;
     }
 
     /** @type {number} */ #index ;
@@ -94,6 +97,22 @@ export default class Parser
         const token = this.#tokens[ this.#index ] ;
         this.#index += 1 ;
         return token ;
+    }
+
+    /**
+     * Silently consumes a `";"` punctuator at the current position,
+     * if any. Used to accept the optional statement terminator in
+     * eval mode (SPEC.md §3.2).
+     */
+    #consumeOptionalSemicolon()
+    {
+        const next = this.#peek() ;
+        if ( next !== undefined &&
+             next.type === TokenType.PUNCTUATOR &&
+             next.value === ";" )
+        {
+            this.#consume() ;
+        }
     }
 
     /**
@@ -280,6 +299,40 @@ export default class Parser
                 next
             ) ;
         }
+    }
+
+    /**
+     * Parses an eval-mode program: a sequence of statements until
+     * end of input. Statements are separated by an optional `";"`;
+     * no other separator is required (SPEC.md §3.2).
+     *
+     * @returns {import("./ast/createProgram.js").Program}
+     */
+    #parseEvalProgram()
+    {
+        const body = [] ;
+
+        while ( true )
+        {
+            const next = this.#peek() ;
+            if ( next === undefined || next.type === TokenType.EOF )
+            {
+                break ;
+            }
+
+            const indexBefore = this.#index ;
+            body.push( this.#parseStatement() ) ;
+
+            if ( this.#index <= indexBefore )
+            {
+                throw this.#syntaxError(
+                    "Parser made no progress; aborting to avoid an infinite loop." ,
+                    next
+                ) ;
+            }
+        }
+
+        return createProgram( ProgramMode.EVAL , body ) ;
     }
 
     /**
@@ -649,61 +702,130 @@ export default class Parser
                 throw this.#syntaxError( "Unterminated object." , open ) ;
             }
 
+            const isEval = this.#options.mode === ProgramMode.EVAL ;
+
             if ( next.type === TokenType.PUNCTUATOR && next.value === "[" )
             {
-                throw this.#syntaxError(
-                    "Computed property keys are not allowed in data mode." ,
-                    next
-                ) ;
-            }
-
-            if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
-            {
-                throw this.#syntaxError(
-                    "Expected a property key but found \",\"." ,
-                    next
-                ) ;
-            }
-
-            const keyStart = next ;
-            const key      = this.#parsePropertyKey() ;
-
-            const afterKey = this.#peek() ;
-
-            if ( afterKey === undefined || afterKey.type === TokenType.EOF )
-            {
-                throw this.#syntaxError( "Unterminated object." , open ) ;
-            }
-
-            if ( afterKey.type !== TokenType.PUNCTUATOR || afterKey.value !== ":" )
-            {
-                if ( key.type === "Identifier" )
+                if ( !isEval )
                 {
                     throw this.#syntaxError(
-                        "Shorthand properties are not allowed in data mode. " +
-                        "Use the long form \"key: value\"." ,
-                        keyStart
+                        "Computed property keys are not allowed in data mode." ,
+                        next
                     ) ;
                 }
-                throw this.#syntaxError(
-                    "Expected \":\" after property key." ,
-                    afterKey
-                ) ;
+
+                const openBracket = this.#consume() ;
+                const computedKey = this.#parseValue() ;
+
+                const closeBracket = this.#peek() ;
+                if ( closeBracket === undefined ||
+                     closeBracket.type !== TokenType.PUNCTUATOR ||
+                     closeBracket.value !== "]" )
+                {
+                    throw this.#syntaxError(
+                        "Expected \"]\" after computed property key." ,
+                        closeBracket
+                    ) ;
+                }
+                this.#consume() ;
+
+                const colonToken = this.#peek() ;
+                if ( colonToken === undefined ||
+                     colonToken.type !== TokenType.PUNCTUATOR ||
+                     colonToken.value !== ":" )
+                {
+                    throw this.#syntaxError(
+                        "Expected \":\" after computed property key." ,
+                        colonToken
+                    ) ;
+                }
+                this.#consume() ;
+
+                const computedValue = this.#parseValue() ;
+
+                properties.push( createProperty(
+                    computedKey ,
+                    computedValue ,
+                    false ,
+                    true ,
+                    openBracket.offset ,
+                    openBracket.line ,
+                    openBracket.column
+                ) ) ;
             }
+            else
+            {
+                if ( next.type === TokenType.PUNCTUATOR && next.value === "," )
+                {
+                    throw this.#syntaxError(
+                        "Expected a property key but found \",\"." ,
+                        next
+                    ) ;
+                }
 
-            this.#consume() ;
+                const keyStart = next ;
+                const key      = this.#parsePropertyKey() ;
 
-            const value = this.#parseValue() ;
+                const afterKey = this.#peek() ;
 
-            properties.push( createProperty(
-                key ,
-                value ,
-                false ,
-                false ,
-                key.offset ,
-                key.line ,
-                key.column
-            ) ) ;
+                if ( afterKey === undefined || afterKey.type === TokenType.EOF )
+                {
+                    throw this.#syntaxError( "Unterminated object." , open ) ;
+                }
+
+                if ( afterKey.type !== TokenType.PUNCTUATOR || afterKey.value !== ":" )
+                {
+                    if ( key.type === NodeType.IDENTIFIER && isEval )
+                    {
+                        const shorthandValue = createIdentifier(
+                            key.name ,
+                            key.offset ,
+                            key.line ,
+                            key.column
+                        ) ;
+                        properties.push( createProperty(
+                            key ,
+                            shorthandValue ,
+                            true ,
+                            false ,
+                            key.offset ,
+                            key.line ,
+                            key.column
+                        ) ) ;
+                    }
+                    else
+                    {
+                        if ( key.type === NodeType.IDENTIFIER )
+                        {
+                            throw this.#syntaxError(
+                                "Shorthand properties are not allowed in data mode. " +
+                                "Use the long form \"key: value\"." ,
+                                keyStart
+                            ) ;
+                        }
+                        throw this.#syntaxError(
+                            "Expected \":\" after property key." ,
+                            afterKey
+                        ) ;
+                    }
+                }
+                else
+                {
+                    this.#consume() ;
+
+                    const value = this.#parseValue() ;
+
+                    properties.push( createProperty(
+                        key ,
+                        value ,
+                        false ,
+                        false ,
+                        key.offset ,
+                        key.line ,
+                        key.column
+                    ) ) ;
+                }
+            }
 
             next = this.#peek() ;
 
@@ -806,6 +928,54 @@ export default class Parser
             "Expected a property key (identifier, string, or number)." ,
             token
         ) ;
+    }
+
+    /**
+     * Parses a single eval-mode `Statement` (SPEC.md §3.2). A
+     * statement is either:
+     *   - an `Assignment`, of the form `MemberPath "=" Expression`;
+     *   - an `Expression`.
+     *
+     * A trailing `";"` is consumed silently when present. Assignment
+     * targets are restricted to `Identifier` and `MemberExpression`
+     * nodes; any other expression is rejected.
+     *
+     * @returns {object}
+     */
+    #parseStatement()
+    {
+        const expr = this.#parseValue() ;
+
+        const next = this.#peek() ;
+
+        if ( next !== undefined &&
+             next.type === TokenType.PUNCTUATOR &&
+             next.value === "=" )
+        {
+            if ( expr.type !== NodeType.IDENTIFIER &&
+                 expr.type !== NodeType.MEMBER_EXPRESSION )
+            {
+                throw this.#syntaxError( "Invalid assignment target." , next ) ;
+            }
+
+            this.#consume() ;
+
+            const value = this.#parseValue() ;
+
+            const statement = createAssignmentStatement(
+                expr ,
+                value ,
+                expr.offset ,
+                expr.line ,
+                expr.column
+            ) ;
+
+            this.#consumeOptionalSemicolon() ;
+            return statement ;
+        }
+
+        this.#consumeOptionalSemicolon() ;
+        return expr ;
     }
 
     /**
