@@ -26,6 +26,7 @@ import LiteralKind              from "../parser/ast/LiteralKind.js" ;
 import NodeType                 from "../parser/ast/NodeType.js" ;
 import ProgramMode              from "../parser/ast/ProgramMode.js" ;
 import resolveStringifyOptions  from "./helpers/resolveStringifyOptions.js" ;
+import { quoteJSON , quoteString , quoteTemplate } from "./quoting.js" ;
 
 /**
  * Tells whether `input` looks like an AST node produced by the parser.
@@ -111,6 +112,15 @@ export default class Serializer
      */
     #serializeLiteralNode( node )
     {
+        if ( node.kind === LiteralKind.STRING )
+        {
+            return this.#serializeStringLiteralNode( node ) ;
+        }
+        if ( node.kind === LiteralKind.TEMPLATE )
+        {
+            return this.#serializeTemplateLiteralNode( node ) ;
+        }
+
         const hasRaw = typeof node.raw === "string" && node.raw.length > 0 ;
 
         if ( hasRaw && ! this.#options.jsonCompatible )
@@ -224,11 +234,86 @@ export default class Serializer
     }
 
     /**
+     * Serializes a `Literal` AST node of kind `string`.
+     *
+     * Preservation of the original `raw` lexeme follows option B
+     * agreed for sub-step 4.2: the lexeme is kept only when its
+     * opening quote matches the quote requested by the caller; any
+     * mismatch (or `jsonCompatible`) triggers a recomputation from
+     * `node.value`.
+     *
+     * @param   {import("../parser/ast/createLiteral.js").Literal} node
+     * @returns {string}
+     */
+    #serializeStringLiteralNode( node )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            return quoteJSON( node.value ) ;
+        }
+
+        const requestedQuote = this.#options.quotes === "single" ? "'" : "\"" ;
+        const raw            = node.raw ;
+
+        if ( typeof raw === "string" && raw.length >= 2 && raw[ 0 ] === requestedQuote )
+        {
+            return raw ;
+        }
+        return quoteString( node.value , requestedQuote ) ;
+    }
+
+    /**
+     * Serializes a runtime JavaScript `string` value, using the
+     * caller-selected quote style. In `jsonCompatible` mode the
+     * output is forced into strict JSON form.
+     *
+     * @param   {string} value
+     * @returns {string}
+     */
+    #serializeStringValue( value )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            return quoteJSON( value ) ;
+        }
+        const quoteChar = this.#options.quotes === "single" ? "'" : "\"" ;
+        return quoteString( value , quoteChar ) ;
+    }
+
+    /**
+     * Serializes a `Literal` AST node of kind `template`.
+     *
+     * Template literals carry multi-line semantics (SPEC §2.10) and
+     * are emitted as back-tick-quoted forms. In `jsonCompatible` mode
+     * the template is downgraded to a strict JSON string, since JSON
+     * has no template form.
+     *
+     * @param   {import("../parser/ast/createLiteral.js").Literal} node
+     * @returns {string}
+     */
+    #serializeTemplateLiteralNode( node )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            return quoteJSON( node.value ) ;
+        }
+
+        const raw = node.raw ;
+
+        if ( typeof raw === "string" && raw.length >= 2 && raw[ 0 ] === "`" )
+        {
+            return raw ;
+        }
+        return quoteTemplate( node.value ) ;
+    }
+
+    /**
      * Serializes a runtime JavaScript value.
      *
-     * Sub-step 4.1 covers `null`, `undefined`, booleans, numbers and
-     * BigInts. Strings and composite values raise `EdenTypeError`
-     * until their dedicated sub-steps land.
+     * Sub-steps 4.1 and 4.2 cover `null`, `undefined`, booleans,
+     * numbers, BigInts and strings. Composite values (arrays and
+     * objects) raise `EdenTypeError` until their dedicated sub-steps
+     * land.
      *
      * @param   {*} value
      * @returns {string}
@@ -259,9 +344,7 @@ export default class Serializer
             }
             case "string" :
             {
-                throw new EdenTypeError(
-                    "Serialization of string values is not yet implemented."
-                ) ;
+                return this.#serializeStringValue( value ) ;
             }
             case "object" :
             {
