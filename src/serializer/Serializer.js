@@ -8,43 +8,27 @@
  * trip is the contract that drives its design (see ARCHITECTURE.md
  * §2.3).
  *
- * This sub-step (4.1) covers the scaffolding and the non-textual
- * scalar literals: `null`, `undefined`, booleans, finite and special
- * numbers, and `BigInt`. Strings, templates, arrays, objects, and
- * eval-mode nodes are wired in subsequent sub-steps; encountering one
- * of them in this sub-step raises `EdenTypeError` with an explicit
- * "not yet implemented" message so callers fail loudly rather than
- * silently dropping data.
+ * Coverage as of sub-step 4.3: scaffolding, scalar literals (`null`,
+ * `undefined`, booleans, numbers, BigInts), strings and templates,
+ * and arrays (both inline-compact and multi-line indented forms).
+ * Objects, unary expressions and eval-mode nodes are wired in
+ * subsequent sub-steps; encountering one of those raises
+ * `EdenTypeError` with an explicit "not yet implemented" message so
+ * callers fail loudly rather than silently dropping data.
  *
  * The class is exposed within the package but is **not** part of the
  * public API — consumers should import `stringify()` or
  * `stringifyAST()` instead.
  */
 
-import EdenTypeError            from "../errors/EdenTypeError.js" ;
-import LiteralKind              from "../parser/ast/LiteralKind.js" ;
-import NodeType                 from "../parser/ast/NodeType.js" ;
-import ProgramMode              from "../parser/ast/ProgramMode.js" ;
-import resolveStringifyOptions  from "./helpers/resolveStringifyOptions.js" ;
+import EdenTypeError                          from "../errors/EdenTypeError.js" ;
+import LiteralKind                            from "../parser/ast/LiteralKind.js" ;
+import NodeType                               from "../parser/ast/NodeType.js" ;
+import ProgramMode                            from "../parser/ast/ProgramMode.js" ;
+import computeIndentUnit                      from "./helpers/computeIndentUnit.js" ;
+import isASTNode                              from "./helpers/isASTNode.js" ;
+import resolveStringifyOptions                from "./helpers/resolveStringifyOptions.js" ;
 import { quoteJSON , quoteString , quoteTemplate } from "./quoting.js" ;
-
-/**
- * Tells whether `input` looks like an AST node produced by the parser.
- *
- * The check is intentionally narrow — a plain object with a string
- * `type` field — so that ordinary JavaScript objects flow through the
- * value path even when they happen to have a `type` property whose
- * value is not a string.
- *
- * @param   {*} input
- * @returns {boolean}
- */
-function isASTNode( input )
-{
-    return input !== null
-        && typeof input === "object"
-        && typeof input.type === "string" ;
-}
 
 export default class Serializer
 {
@@ -53,7 +37,8 @@ export default class Serializer
      */
     constructor( options )
     {
-        this.#options = resolveStringifyOptions( options ) ;
+        this.#options    = resolveStringifyOptions( options ) ;
+        this.#indentUnit = computeIndentUnit( this.#options.indent ) ;
     }
 
     /**
@@ -72,12 +57,95 @@ export default class Serializer
     {
         if ( isASTNode( input ) )
         {
-            return this.#serializeNode( input ) ;
+            return this.#serializeNode( input , "" ) ;
         }
-        return this.#serializeValue( input ) ;
+        return this.#serializeValue( input , "" ) ;
     }
 
+    #indentUnit ;
     #options ;
+
+    /**
+     * Lays out an array of pre-rendered items between brackets,
+     * picking between the inline-compact form and the multi-line
+     * indented form according to the current `indent` option.
+     *
+     * Inline form: `[a,b,c]` (no space after commas, no trailing
+     * comma).
+     *
+     * Indented form: each item on its own line, prefixed by
+     * `prefix + indentUnit`; closing bracket lines up with `prefix`.
+     * A trailing comma is added on the last item iff
+     * `options.trailingCommas` is set AND `jsonCompatible` is false.
+     *
+     * @param   {*[]}                       items
+     * @param   {string}                    prefix       - Indentation prefix of the *enclosing* container.
+     * @param   {(item: *, p: string) => string} renderItem - Per-item renderer; receives the child prefix.
+     * @returns {string}
+     */
+    #renderArray( items , prefix , renderItem )
+    {
+        if ( items.length === 0 )
+        {
+            return "[]" ;
+        }
+        if ( this.#indentUnit === "" )
+        {
+            const parts = items.map( ( item ) => renderItem( item , prefix ) ) ;
+            return "[" + parts.join( "," ) + "]" ;
+        }
+
+        const childPrefix = prefix + this.#indentUnit ;
+        const parts       = items.map( ( item ) => renderItem( item , childPrefix ) ) ;
+        const trailing    = this.#options.trailingCommas && ! this.#options.jsonCompatible
+                            ? ","
+                            : "" ;
+
+        return "[\n"
+             + childPrefix
+             + parts.join( ",\n" + childPrefix )
+             + trailing
+             + "\n"
+             + prefix
+             + "]" ;
+    }
+
+    /**
+     * Serializes an `ArrayExpression` AST node. Each element is
+     * dispatched back through `#serializeNode`, so nested literals
+     * keep their `raw` lexeme when applicable.
+     *
+     * @param   {import("../parser/ast/createArrayExpression.js").ArrayExpression} node
+     * @param   {string} prefix - Indentation prefix of the enclosing container.
+     * @returns {string}
+     */
+    #serializeArrayExpression( node , prefix )
+    {
+        return this.#renderArray(
+            node.elements ,
+            prefix ,
+            ( child , childPrefix ) => this.#serializeNode( child , childPrefix )
+        ) ;
+    }
+
+    /**
+     * Serializes a runtime JavaScript array. Each element is
+     * dispatched back through `#serializeValue`, which applies the
+     * `jsonCompatible` substitutions (`undefined` / `NaN` / `±Infinity`
+     * → `null`) at every position.
+     *
+     * @param   {*[]}    array
+     * @param   {string} prefix - Indentation prefix of the enclosing container.
+     * @returns {string}
+     */
+    #serializeArrayValue( array , prefix )
+    {
+        return this.#renderArray(
+            array ,
+            prefix ,
+            ( child , childPrefix ) => this.#serializeValue( child , childPrefix )
+        ) ;
+    }
 
     /**
      * Serializes a `BigInt` value.
@@ -140,32 +208,41 @@ export default class Serializer
                 }
             }
         }
-        return this.#serializeValue( node.value ) ;
+        return this.#serializeValue( node.value , "" ) ;
     }
 
     /**
-     * Dispatches AST node serialization on `node.type`. Sub-step 4.1
-     * supports only `Program` (data mode, body length ≤ 1) and
-     * `Literal`; every other node type raises `EdenTypeError` until
-     * the corresponding sub-step lands.
+     * Dispatches AST node serialization on `node.type`. As of
+     * sub-step 4.3, supported types are `Program`, `Literal` and
+     * `ArrayExpression`; every other node type raises
+     * `EdenTypeError` until its dedicated sub-step lands.
      *
      * @param   {{type: string}} node
+     * @param   {string}         prefix - Indentation prefix of the enclosing container.
      * @returns {string}
      */
-    #serializeNode( node )
+    #serializeNode( node , prefix )
     {
         switch ( node.type )
         {
             case NodeType.PROGRAM :
             {
                 return this.#serializeProgram(
-                    /** @type {import("../parser/ast/createProgram.js").Program} */ ( node )
+                    /** @type {import("../parser/ast/createProgram.js").Program} */ ( node ) ,
+                    prefix
                 ) ;
             }
             case NodeType.LITERAL :
             {
                 return this.#serializeLiteralNode(
                     /** @type {import("../parser/ast/createLiteral.js").Literal} */ ( node )
+                ) ;
+            }
+            case NodeType.ARRAY_EXPRESSION :
+            {
+                return this.#serializeArrayExpression(
+                    /** @type {import("../parser/ast/createArrayExpression.js").ArrayExpression} */ ( node ) ,
+                    prefix
                 ) ;
             }
             default :
@@ -205,14 +282,15 @@ export default class Serializer
     }
 
     /**
-     * Serializes a `Program` node. In sub-step 4.1, only data-mode
-     * programs with a body of at most one element are accepted; the
-     * multi-statement eval-mode path lands in sub-step 4.6.
+     * Serializes a `Program` node. Data-mode programs with a body of
+     * at most one element are accepted; the multi-statement eval-mode
+     * path lands in sub-step 4.6.
      *
      * @param   {import("../parser/ast/createProgram.js").Program} node
+     * @param   {string} prefix - Indentation prefix of the enclosing container (top-level is `""`).
      * @returns {string}
      */
-    #serializeProgram( node )
+    #serializeProgram( node , prefix )
     {
         if ( node.mode === ProgramMode.EVAL )
         {
@@ -230,7 +308,7 @@ export default class Serializer
                 "Data-mode Program must contain exactly one value."
             ) ;
         }
-        return this.#serializeNode( node.body[ 0 ] ) ;
+        return this.#serializeNode( node.body[ 0 ] , prefix ) ;
     }
 
     /**
@@ -310,15 +388,15 @@ export default class Serializer
     /**
      * Serializes a runtime JavaScript value.
      *
-     * Sub-steps 4.1 and 4.2 cover `null`, `undefined`, booleans,
-     * numbers, BigInts and strings. Composite values (arrays and
-     * objects) raise `EdenTypeError` until their dedicated sub-steps
-     * land.
+     * Sub-steps 4.1 through 4.3 cover `null`, `undefined`, booleans,
+     * numbers, BigInts, strings and arrays. Plain objects raise
+     * `EdenTypeError` until sub-step 4.4 lands.
      *
-     * @param   {*} value
+     * @param   {*}      value
+     * @param   {string} prefix - Indentation prefix of the enclosing container.
      * @returns {string}
      */
-    #serializeValue( value )
+    #serializeValue( value , prefix )
     {
         if ( value === null )
         {
@@ -348,8 +426,12 @@ export default class Serializer
             }
             case "object" :
             {
+                if ( Array.isArray( value ) )
+                {
+                    return this.#serializeArrayValue( value , prefix ) ;
+                }
                 throw new EdenTypeError(
-                    "Serialization of object and array values is not yet implemented."
+                    "Serialization of plain object values is not yet implemented."
                 ) ;
             }
             default :
