@@ -291,26 +291,7 @@ describe( "stringifyAST — ObjectExpression" , () =>
         expect( stringifyAST( program , { jsonCompatible: true } ) ).toBe( "{\"255\":1}" ) ;
     } ) ;
 
-    test( "Constructed Property with computed:true throws" , () =>
-    {
-        const node =
-        {
-            type       : NodeType.OBJECT_EXPRESSION ,
-            properties :
-            [
-                {
-                    type      : "Property" ,
-                    key       : { type: NodeType.IDENTIFIER , name: "x" } ,
-                    value     : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER } ,
-                    shorthand : false ,
-                    computed  : true
-                }
-            ]
-        } ;
-        expect( () => stringifyAST( node ) ).toThrow( EdenTypeError ) ;
-    } ) ;
-
-    test( "Constructed Property with shorthand:true throws" , () =>
+    test( "Property shorthand under jsonCompatible throws EdenTypeError" , () =>
     {
         const node =
         {
@@ -326,7 +307,26 @@ describe( "stringifyAST — ObjectExpression" , () =>
                 }
             ]
         } ;
-        expect( () => stringifyAST( node ) ).toThrow( EdenTypeError ) ;
+        expect( () => stringifyAST( node , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "Property computed under jsonCompatible throws EdenTypeError" , () =>
+    {
+        const node =
+        {
+            type       : NodeType.OBJECT_EXPRESSION ,
+            properties :
+            [
+                {
+                    type      : "Property" ,
+                    key       : { type: NodeType.IDENTIFIER , name: "x" } ,
+                    value     : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER } ,
+                    shorthand : false ,
+                    computed  : true
+                }
+            ]
+        } ;
+        expect( () => stringifyAST( node , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
 
@@ -712,15 +712,10 @@ describe( "stringifyAST — guards" , () =>
         expect( () => stringifyAST( { foo: 1 } ) ).toThrow( EdenTypeError ) ;
     } ) ;
 
-    test( "unsupported AST node type throws EdenTypeError" , () =>
+    test( "unknown AST node type throws EdenTypeError" , () =>
     {
-        const fakeCall =
-        {
-            type      : NodeType.CALL_EXPRESSION ,
-            callee    : { type: NodeType.IDENTIFIER , name: "foo" } ,
-            arguments : []
-        } ;
-        expect( () => stringifyAST( fakeCall ) ).toThrow( EdenTypeError ) ;
+        const forgedNode = { type: "FakeNodeType" } ;
+        expect( () => stringifyAST( forgedNode ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
 
@@ -792,17 +787,6 @@ describe( "stringifyAST — Program node" , () =>
         expect( stringifyAST( program ) ).toBe( "true" ) ;
     } ) ;
 
-    test( "eval-mode Program is rejected in sub-step 4.1" , () =>
-    {
-        const evalProgram =
-        {
-            type : NodeType.PROGRAM ,
-            mode : ProgramMode.EVAL ,
-            body : []
-        } ;
-        expect( () => stringifyAST( evalProgram ) ).toThrow( EdenTypeError ) ;
-    } ) ;
-
     test( "data-mode Program with more than one body element is rejected" , () =>
     {
         const program =
@@ -872,5 +856,203 @@ describe( "stringifyAST — UnaryExpression under jsonCompatible" , () =>
     test( "-1n raises EdenTypeError"             , () =>
     {
         expect( () => stringifyAST( parseToAST( "-1n" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+/**
+ * Convenience helper — parses an eval-mode source so the resulting
+ * tests stay short.
+ *
+ * @param   {string} source
+ * @returns {object}
+ */
+function evalAST( source )
+{
+    return parseToAST( source , { mode: ProgramMode.EVAL } ) ;
+}
+
+describe( "stringifyAST — Identifier" , () =>
+{
+    test.each(
+    [
+        [ "foo"  ] ,
+        [ "$bar" ] ,
+        [ "_baz" ] ,
+        [ "café" ]
+    ] )( "round trip of identifier %p" , ( source ) =>
+    {
+        expect( stringifyAST( evalAST( source ) ) ).toBe( source ) ;
+    } ) ;
+
+    test( "Identifier under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "foo" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — MemberExpression" , () =>
+{
+    test.each(
+    [
+        [ "a.b"                ] ,
+        [ "a.b.c"              ] ,
+        [ "obj.method"         ] ,
+        [ "a[0]"               ] ,
+        [ "a[42]"              ] ,
+        [ "a[0xFF]"            ] ,
+        [ "a[\"key\"]"         ] ,
+        [ "a[\"key with space\"]" ] ,
+        [ "obj.method.field"   ]
+    ] )( "round trip of %p" , ( source ) =>
+    {
+        expect( stringifyAST( evalAST( source ) ) ).toBe( source ) ;
+    } ) ;
+
+    test( "MemberExpression under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "a.b" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — CallExpression" , () =>
+{
+    test.each(
+    [
+        [ "foo()"          ] ,
+        [ "foo(1)"         ] ,
+        [ "foo(1,2,3)"     ] ,
+        [ "obj.method(x)"  ] ,
+        [ "obj.method(1,\"hi\",true)" ]
+    ] )( "round trip of %p (compact)" , ( source ) =>
+    {
+        expect( stringifyAST( evalAST( source ) ) ).toBe( source ) ;
+    } ) ;
+
+    test( "indented mode adds space after argument commas" , () =>
+    {
+        expect( stringifyAST( evalAST( "foo(1,2,3)" ) , { indent: 2 } ) ).toBe( "foo(1, 2, 3)" ) ;
+    } ) ;
+
+    test( "CallExpression under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "foo()" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — NewExpression" , () =>
+{
+    test( "without args (no parens in source) → parenless form" , () =>
+    {
+        expect( stringifyAST( evalAST( "new Date" ) ) ).toBe( "new Date" ) ;
+    } ) ;
+
+    test( "without args (empty parens in source) → parenless form (normalization)" , () =>
+    {
+        expect( stringifyAST( evalAST( "new Date()" ) ) ).toBe( "new Date" ) ;
+    } ) ;
+
+    test( "with one arg" , () =>
+    {
+        expect( stringifyAST( evalAST( "new Date(\"2024-01-15\")" ) ) ).toBe( "new Date(\"2024-01-15\")" ) ;
+    } ) ;
+
+    test( "with several args" , () =>
+    {
+        expect( stringifyAST( evalAST( "new Foo(1,2,3)" ) ) ).toBe( "new Foo(1,2,3)" ) ;
+    } ) ;
+
+    test( "with dotted callee" , () =>
+    {
+        expect( stringifyAST( evalAST( "new Mod.Sub(1)" ) ) ).toBe( "new Mod.Sub(1)" ) ;
+    } ) ;
+
+    test( "NewExpression under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "new Date" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — AssignmentStatement" , () =>
+{
+    test( "simple identifier target" , () =>
+    {
+        expect( stringifyAST( evalAST( "a = 1" ) ) ).toBe( "a = 1" ) ;
+    } ) ;
+
+    test( "member expression target" , () =>
+    {
+        expect( stringifyAST( evalAST( "obj.x = \"hi\"" ) ) ).toBe( "obj.x = \"hi\"" ) ;
+    } ) ;
+
+    test( "deep member target with object value" , () =>
+    {
+        expect( stringifyAST( evalAST( "a.b.c = {x:1}" ) ) ).toBe( "a.b.c = {x:1}" ) ;
+    } ) ;
+
+    test( "assignment with constructor call value" , () =>
+    {
+        expect( stringifyAST( evalAST( "user.joined = new Date(\"2024-01-15\")" ) ) ).toBe( "user.joined = new Date(\"2024-01-15\")" ) ;
+    } ) ;
+
+    test( "spaces around `=` kept even in compact mode" , () =>
+    {
+        expect( stringifyAST( evalAST( "a=1" ) ) ).toBe( "a = 1" ) ;
+    } ) ;
+
+    test( "AssignmentStatement under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "a = 1" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — Program eval-mode multi-statement" , () =>
+{
+    test( "two assignments joined by `;` in compact mode" , () =>
+    {
+        expect( stringifyAST( evalAST( "a = 1; b = 2" ) ) ).toBe( "a = 1;b = 2" ) ;
+    } ) ;
+
+    test( "two assignments joined by newline in indented mode" , () =>
+    {
+        expect( stringifyAST( evalAST( "a = 1; b = 2" ) , { indent: 2 } ) ).toBe( "a = 1\nb = 2" ) ;
+    } ) ;
+
+    test( "assignment then expression statement" , () =>
+    {
+        expect( stringifyAST( evalAST( "user = {name:\"Marc\"}; user.name" ) ) ).toBe( "user = {name:\"Marc\"};user.name" ) ;
+    } ) ;
+
+    test( "Program eval body empty serializes to empty string" , () =>
+    {
+        const node = { type: NodeType.PROGRAM , mode: ProgramMode.EVAL , body: [] } ;
+        expect( stringifyAST( node ) ).toBe( "" ) ;
+    } ) ;
+
+    test( "Program eval under jsonCompatible throws" , () =>
+    {
+        expect( () => stringifyAST( evalAST( "a = 1" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — Property shorthand and computed" , () =>
+{
+    test( "shorthand property round trip" , () =>
+    {
+        expect( stringifyAST( evalAST( "{foo}" ) ) ).toBe( "{foo}" ) ;
+    } ) ;
+
+    test( "shorthand mixed with longhand" , () =>
+    {
+        expect( stringifyAST( evalAST( "{a, b:2, c}" ) ) ).toBe( "{a,b:2,c}" ) ;
+    } ) ;
+
+    test( "computed key with identifier expression" , () =>
+    {
+        expect( stringifyAST( evalAST( "{[foo]:1}" ) ) ).toBe( "{[foo]:1}" ) ;
+    } ) ;
+
+    test( "computed key with member expression" , () =>
+    {
+        expect( stringifyAST( evalAST( "{[obj.key]:1}" ) ) ).toBe( "{[obj.key]:1}" ) ;
     } ) ;
 } ) ;

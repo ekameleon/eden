@@ -8,16 +8,15 @@
  * trip is the contract that drives its design (see ARCHITECTURE.md
  * §2.3).
  *
- * Coverage as of sub-step 4.5: the full data-mode value space —
- * scalar literals (`null`, `undefined`, booleans, numbers,
- * BigInts), strings and templates, arrays, plain objects, and
- * `UnaryExpression` nodes for `+/-` in front of numeric literals.
- * Eval-mode nodes (`Identifier`, `MemberExpression`,
- * `CallExpression`, `NewExpression`, `AssignmentStatement`, and
- * the multi-statement `Program`) are wired in subsequent
- * sub-steps; encountering one of those raises `EdenTypeError` with
- * an explicit "not yet implemented" message so callers fail loudly
- * rather than silently dropping data.
+ * Coverage as of sub-step 4.6: every AST node type produced by the
+ * parser. The data-mode value space — scalar literals (`null`,
+ * `undefined`, booleans, numbers, BigInts), strings and templates,
+ * arrays, plain objects, `UnaryExpression`. The eval-mode surface —
+ * `Identifier`, `MemberExpression`, `CallExpression`,
+ * `NewExpression`, `AssignmentStatement`, multi-statement `Program`,
+ * shorthand and computed `Property`. Every eval-mode shape is
+ * unrepresentable in strict JSON and raises `EdenTypeError` under
+ * `jsonCompatible`.
  *
  * The class is exposed within the package but is **not** part of the
  * public API — consumers should import `stringify()` or
@@ -98,6 +97,23 @@ export default class Serializer
 
     #indentUnit ;
     #options ;
+
+    /**
+     * Renders the parenthesized argument list shared by `CallExpression`
+     * and `NewExpression`. The list is always kept on a single line; only
+     * the inter-argument separator follows the active indent mode
+     * (`","` in compact form, `", "` in indented form).
+     *
+     * @param   {{type: string}[]} args
+     * @param   {string}           prefix
+     * @returns {string}
+     */
+    #renderArguments( args , prefix )
+    {
+        const sep   = this.#indentUnit === "" ? "," : ", " ;
+        const parts = args.map( ( arg ) => this.#serializeNode( arg , prefix ) ) ;
+        return "(" + parts.join( sep ) + ")" ;
+    }
 
     /**
      * Lays out an array of pre-rendered items between brackets,
@@ -251,6 +267,31 @@ export default class Serializer
     }
 
     /**
+     * Serializes an `AssignmentStatement` AST node, with fixed spaces
+     * around `=` for readability regardless of the active indent mode.
+     *
+     * Eval-mode shape, unrepresentable in strict JSON: raises
+     * `EdenTypeError` under `jsonCompatible`.
+     *
+     * @param   {import("../parser/ast/createAssignmentStatement.js").AssignmentStatement} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeAssignmentStatement( node , prefix )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            throw new EdenTypeError(
+                "Serialization of AssignmentStatement requires eden, not strict JSON."
+            ) ;
+        }
+        const { target , value } = node ;
+        return this.#serializeNode( target , prefix )
+             + " = "
+             + this.#serializeNode( value , prefix ) ;
+    }
+
+    /**
      * Serializes a `BigInt` value.
      *
      * In `jsonCompatible` mode, BigInts cannot be represented in
@@ -269,6 +310,47 @@ export default class Serializer
             ) ;
         }
         return `${ value.toString() }n` ;
+    }
+
+    /**
+     * Serializes a `CallExpression` AST node. Eval-mode shape,
+     * unrepresentable in strict JSON: raises `EdenTypeError` under
+     * `jsonCompatible`.
+     *
+     * @param   {import("../parser/ast/createCallExpression.js").CallExpression} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeCallExpression( node , prefix )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            throw new EdenTypeError(
+                "Serialization of CallExpression requires eden, not strict JSON."
+            ) ;
+        }
+        const { callee , arguments: args } = node ;
+        return this.#serializeNode( callee , prefix )
+             + this.#renderArguments( args , prefix ) ;
+    }
+
+    /**
+     * Serializes an `Identifier` AST node. Eval-mode shape,
+     * unrepresentable in strict JSON: raises `EdenTypeError` under
+     * `jsonCompatible`.
+     *
+     * @param   {import("../parser/ast/createIdentifier.js").Identifier} node
+     * @returns {string}
+     */
+    #serializeIdentifier( node )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            throw new EdenTypeError(
+                "Serialization of Identifier requires eden, not strict JSON."
+            ) ;
+        }
+        return node.name ;
     }
 
     /**
@@ -315,11 +397,77 @@ export default class Serializer
     }
 
     /**
-     * Dispatches AST node serialization on `node.type`. As of
-     * sub-step 4.5, supported types are `Program`, `Literal`,
-     * `ArrayExpression`, `ObjectExpression` and `UnaryExpression`;
-     * every other node type raises `EdenTypeError` until its
-     * dedicated sub-step lands.
+     * Serializes a `MemberExpression` AST node, picking between the
+     * dotted form (`obj.prop`) and the computed form (`obj[key]`).
+     *
+     * For the computed form the property may be a `StringLiteral`
+     * or a `NumericLiteral` per SPEC §3.3; both go through
+     * `#serializeNode` so their `raw` lexeme is preserved.
+     *
+     * Eval-mode shape, unrepresentable in strict JSON: raises
+     * `EdenTypeError` under `jsonCompatible`.
+     *
+     * @param   {import("../parser/ast/createMemberExpression.js").MemberExpression} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeMemberExpression( node , prefix )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            throw new EdenTypeError(
+                "Serialization of MemberExpression requires eden, not strict JSON."
+            ) ;
+        }
+        const { object , property , computed } = node ;
+        const base                             = this.#serializeNode( object , prefix ) ;
+
+        if ( computed )
+        {
+            return base + "[" + this.#serializeNode( property , prefix ) + "]" ;
+        }
+        return base + "." + property.name ;
+    }
+
+    /**
+     * Serializes a `NewExpression` AST node.
+     *
+     * When `arguments` is empty the output is the parenless form
+     * `new Foo`, which is shorter and semantically equivalent to
+     * `new Foo()`. The AST does not distinguish the two source
+     * forms (the parser emits the same shape for both), so this
+     * normalization is lossless with respect to the AST.
+     *
+     * Eval-mode shape, unrepresentable in strict JSON: raises
+     * `EdenTypeError` under `jsonCompatible`.
+     *
+     * @param   {import("../parser/ast/createNewExpression.js").NewExpression} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeNewExpression( node , prefix )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            throw new EdenTypeError(
+                "Serialization of NewExpression requires eden, not strict JSON."
+            ) ;
+        }
+        const { callee , arguments: args } = node ;
+        const head                         = "new " + this.#serializeNode( callee , prefix ) ;
+
+        if ( args && args.length > 0 )
+        {
+            return head + this.#renderArguments( args , prefix ) ;
+        }
+        return head ;
+    }
+
+    /**
+     * Dispatches AST node serialization on `node.type`. Every node
+     * type the parser can produce is supported as of sub-step 4.6;
+     * an unknown `type` (forged by hand) still triggers the
+     * defensive `default` branch and raises `EdenTypeError`.
      *
      * @param   {{type: string}} node
      * @param   {string}         prefix - Indentation prefix of the enclosing container.
@@ -363,10 +511,44 @@ export default class Serializer
                     prefix
                 ) ;
             }
+            case NodeType.IDENTIFIER :
+            {
+                return this.#serializeIdentifier(
+                    /** @type {import("../parser/ast/createIdentifier.js").Identifier} */ ( node )
+                ) ;
+            }
+            case NodeType.MEMBER_EXPRESSION :
+            {
+                return this.#serializeMemberExpression(
+                    /** @type {import("../parser/ast/createMemberExpression.js").MemberExpression} */ ( node ) ,
+                    prefix
+                ) ;
+            }
+            case NodeType.CALL_EXPRESSION :
+            {
+                return this.#serializeCallExpression(
+                    /** @type {import("../parser/ast/createCallExpression.js").CallExpression} */ ( node ) ,
+                    prefix
+                ) ;
+            }
+            case NodeType.NEW_EXPRESSION :
+            {
+                return this.#serializeNewExpression(
+                    /** @type {import("../parser/ast/createNewExpression.js").NewExpression} */ ( node ) ,
+                    prefix
+                ) ;
+            }
+            case NodeType.ASSIGNMENT_STATEMENT :
+            {
+                return this.#serializeAssignmentStatement(
+                    /** @type {import("../parser/ast/createAssignmentStatement.js").AssignmentStatement} */ ( node ) ,
+                    prefix
+                ) ;
+            }
             default :
             {
                 throw new EdenTypeError(
-                    `Serialization of AST node "${ node.type }" is not yet implemented.`
+                    `Cannot serialize AST node of type "${ node.type }".`
                 ) ;
             }
         }
@@ -446,21 +628,33 @@ export default class Serializer
             prefix ,
             ( property , childPrefix ) =>
             {
-                if ( property.computed )
+                const { computed , shorthand , key , value } = property ;
+
+                if ( shorthand )
                 {
-                    throw new EdenTypeError(
-                        "Serialization of computed property keys is not yet implemented."
-                    ) ;
+                    if ( this.#options.jsonCompatible )
+                    {
+                        throw new EdenTypeError(
+                            "Shorthand properties require eden, not strict JSON."
+                        ) ;
+                    }
+                    return key.name ;
                 }
-                if ( property.shorthand )
+                if ( computed )
                 {
-                    throw new EdenTypeError(
-                        "Serialization of shorthand properties is not yet implemented."
-                    ) ;
+                    if ( this.#options.jsonCompatible )
+                    {
+                        throw new EdenTypeError(
+                            "Computed property keys require eden, not strict JSON."
+                        ) ;
+                    }
+                    return "[" + this.#serializeNode( key , childPrefix ) + "]"
+                         + separator
+                         + this.#serializeNode( value , childPrefix ) ;
                 }
-                return this.#serializePropertyKey( property.key )
+                return this.#serializePropertyKey( key )
                      + separator
-                     + this.#serializeNode( property.value , childPrefix ) ;
+                     + this.#serializeNode( value , childPrefix ) ;
             }
         ) ;
     }
@@ -504,9 +698,17 @@ export default class Serializer
     }
 
     /**
-     * Serializes a `Program` node. Data-mode programs with a body of
-     * at most one element are accepted; the multi-statement eval-mode
-     * path lands in sub-step 4.6.
+     * Serializes a `Program` node.
+     *
+     * Data-mode programs contain at most one value (SPEC §3.1); any
+     * extra body element is a programming error and raises
+     * `EdenTypeError`.
+     *
+     * Eval-mode programs contain zero or more statements (SPEC §3.2).
+     * Statements are joined by `;` in compact form or by `\n` + the
+     * current prefix in indented form. Eval-mode programs are
+     * unrepresentable in strict JSON and raise `EdenTypeError` under
+     * `jsonCompatible`.
      *
      * @param   {import("../parser/ast/createProgram.js").Program} node
      * @param   {string} prefix - Indentation prefix of the enclosing container (top-level is `""`).
@@ -514,23 +716,33 @@ export default class Serializer
      */
     #serializeProgram( node , prefix )
     {
-        if ( node.mode === ProgramMode.EVAL )
-        {
-            throw new EdenTypeError(
-                "Serialization of eval-mode programs is not yet implemented."
-            ) ;
-        }
-        if ( node.body.length === 0 )
+        const { mode , body } = node ;
+
+        if ( body.length === 0 )
         {
             return "" ;
         }
-        if ( node.body.length > 1 )
+
+        if ( mode === ProgramMode.EVAL )
+        {
+            if ( this.#options.jsonCompatible )
+            {
+                throw new EdenTypeError(
+                    "Serialization of eval-mode programs requires eden, not strict JSON."
+                ) ;
+            }
+            const separator = this.#indentUnit === "" ? ";" : "\n" + prefix ;
+            const parts     = body.map( ( statement ) => this.#serializeNode( statement , prefix ) ) ;
+            return parts.join( separator ) ;
+        }
+
+        if ( body.length > 1 )
         {
             throw new EdenTypeError(
                 "Data-mode Program must contain exactly one value."
             ) ;
         }
-        return this.#serializeNode( node.body[ 0 ] , prefix ) ;
+        return this.#serializeNode( body[ 0 ] , prefix ) ;
     }
 
     /**
