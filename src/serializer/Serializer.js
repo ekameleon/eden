@@ -8,13 +8,15 @@
  * trip is the contract that drives its design (see ARCHITECTURE.md
  * §2.3).
  *
- * Coverage as of sub-step 4.3: scaffolding, scalar literals (`null`,
+ * Coverage as of sub-step 4.4: scaffolding, scalar literals (`null`,
  * `undefined`, booleans, numbers, BigInts), strings and templates,
- * and arrays (both inline-compact and multi-line indented forms).
- * Objects, unary expressions and eval-mode nodes are wired in
- * subsequent sub-steps; encountering one of those raises
- * `EdenTypeError` with an explicit "not yet implemented" message so
- * callers fail loudly rather than silently dropping data.
+ * arrays and plain objects (both inline-compact and multi-line
+ * indented forms, with quoted/unquoted key selection, sorting and
+ * trailing-comma control). Unary expressions and eval-mode nodes
+ * are wired in subsequent sub-steps; encountering one of those
+ * raises `EdenTypeError` with an explicit "not yet implemented"
+ * message so callers fail loudly rather than silently dropping
+ * data.
  *
  * The class is exposed within the package but is **not** part of the
  * public API — consumers should import `stringify()` or
@@ -25,10 +27,41 @@ import EdenTypeError                          from "../errors/EdenTypeError.js" 
 import LiteralKind                            from "../parser/ast/LiteralKind.js" ;
 import NodeType                               from "../parser/ast/NodeType.js" ;
 import ProgramMode                            from "../parser/ast/ProgramMode.js" ;
+import canBeUnquotedKey                       from "./helpers/canBeUnquotedKey.js" ;
 import computeIndentUnit                      from "./helpers/computeIndentUnit.js" ;
 import isASTNode                              from "./helpers/isASTNode.js" ;
 import resolveStringifyOptions                from "./helpers/resolveStringifyOptions.js" ;
 import { quoteJSON , quoteString , quoteTemplate } from "./quoting.js" ;
+
+/**
+ * Non-negative decimal integer with no leading zero — the subset of
+ * numeric strings that can be emitted as an unquoted property key
+ * with a guaranteed lossless round-trip through the parser.
+ */
+const NUMERIC_KEY_RE = /^(0|[1-9][0-9]*)$/ ;
+
+/**
+ * Extracts the runtime string a `Property` AST key would resolve to.
+ * Used by the `sortKeys` option to order properties consistently
+ * with the order the corresponding runtime object exposes through
+ * `Object.keys()`.
+ *
+ * @param   {import("../parser/ast/createProperty.js").Property} property
+ * @returns {string}
+ */
+function propertyKeyString( property )
+{
+    const key = property.key ;
+    if ( key.type === NodeType.IDENTIFIER )
+    {
+        return key.name ;
+    }
+    if ( key.type === NodeType.LITERAL )
+    {
+        return typeof key.value === "string" ? key.value : String( key.value ) ;
+    }
+    return "" ;
+}
 
 export default class Serializer
 {
@@ -108,6 +141,75 @@ export default class Serializer
              + "\n"
              + prefix
              + "]" ;
+    }
+
+    /**
+     * Renders a property key from a runtime string `name`, choosing
+     * between the unquoted identifier form, the unquoted numeric form
+     * (decimal non-negative integers without leading zero), and the
+     * quoted form. `jsonCompatible` always wins and forces a strict
+     * JSON-quoted form.
+     *
+     * @param   {string} name
+     * @returns {string}
+     */
+    #renderKey( name )
+    {
+        if ( this.#options.jsonCompatible )
+        {
+            return quoteJSON( name ) ;
+        }
+        if ( this.#options.unquotedKeys )
+        {
+            if ( canBeUnquotedKey( name )    ) { return name ; }
+            if ( NUMERIC_KEY_RE.test( name ) ) { return name ; }
+        }
+        const quoteChar = this.#options.quotes === "single" ? "'" : "\"" ;
+        return quoteString( name , quoteChar ) ;
+    }
+
+    /**
+     * Lays out an array of pre-rendered entries between braces,
+     * picking between the inline-compact form and the multi-line
+     * indented form according to the current `indent` option.
+     *
+     * Inline form: `{a:1,b:2}` — no space after either `:` or `,`.
+     *
+     * Indented form: each entry on its own line, prefixed by
+     * `prefix + indentUnit`, with one space after `:`. Closing brace
+     * lines up with `prefix`. Trailing comma applied iff
+     * `options.trailingCommas` is set AND `jsonCompatible` is false.
+     *
+     * @param   {*[]}                                items
+     * @param   {string}                             prefix
+     * @param   {(item: *, p: string) => string}     renderEntry - Per-entry renderer; receives the child prefix.
+     * @returns {string}
+     */
+    #renderObject( items , prefix , renderEntry )
+    {
+        if ( items.length === 0 )
+        {
+            return "{}" ;
+        }
+        if ( this.#indentUnit === "" )
+        {
+            const parts = items.map( ( item ) => renderEntry( item , prefix ) ) ;
+            return "{" + parts.join( "," ) + "}" ;
+        }
+
+        const childPrefix = prefix + this.#indentUnit ;
+        const parts       = items.map( ( item ) => renderEntry( item , childPrefix ) ) ;
+        const trailing    = this.#options.trailingCommas && ! this.#options.jsonCompatible
+                            ? ","
+                            : "" ;
+
+        return "{\n"
+             + childPrefix
+             + parts.join( ",\n" + childPrefix )
+             + trailing
+             + "\n"
+             + prefix
+             + "}" ;
     }
 
     /**
@@ -213,9 +315,10 @@ export default class Serializer
 
     /**
      * Dispatches AST node serialization on `node.type`. As of
-     * sub-step 4.3, supported types are `Program`, `Literal` and
-     * `ArrayExpression`; every other node type raises
-     * `EdenTypeError` until its dedicated sub-step lands.
+     * sub-step 4.4, supported types are `Program`, `Literal`,
+     * `ArrayExpression` and `ObjectExpression`; every other node
+     * type raises `EdenTypeError` until its dedicated sub-step
+     * lands.
      *
      * @param   {{type: string}} node
      * @param   {string}         prefix - Indentation prefix of the enclosing container.
@@ -242,6 +345,13 @@ export default class Serializer
             {
                 return this.#serializeArrayExpression(
                     /** @type {import("../parser/ast/createArrayExpression.js").ArrayExpression} */ ( node ) ,
+                    prefix
+                ) ;
+            }
+            case NodeType.OBJECT_EXPRESSION :
+            {
+                return this.#serializeObjectExpression(
+                    /** @type {import("../parser/ast/createObjectExpression.js").ObjectExpression} */ ( node ) ,
                     prefix
                 ) ;
             }
@@ -282,6 +392,110 @@ export default class Serializer
     }
 
     /**
+     * Serializes an `ObjectExpression` AST node.
+     *
+     * Property order is preserved by default. With `sortKeys: true`,
+     * properties are reordered by the lexicographic order of their
+     * *logical* key (the runtime string the key would resolve to),
+     * matching what `Object.keys()` would return for the corresponding
+     * runtime object.
+     *
+     * Under `jsonCompatible`, properties whose value is a Literal of
+     * kind `undefined` are dropped (SPEC §6.1).
+     *
+     * @param   {import("../parser/ast/createObjectExpression.js").ObjectExpression} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeObjectExpression( node , prefix )
+    {
+        let properties = node.properties ;
+
+        if ( this.#options.jsonCompatible )
+        {
+            properties = properties.filter( ( p ) =>
+                ! ( p.value
+                 && p.value.type === NodeType.LITERAL
+                 && p.value.kind === LiteralKind.UNDEFINED ) ) ;
+        }
+
+        if ( this.#options.sortKeys )
+        {
+            properties = [ ...properties ].sort( ( a , b ) =>
+            {
+                const ka = propertyKeyString( a ) ;
+                const kb = propertyKeyString( b ) ;
+                if ( ka < kb ) { return -1 ; }
+                if ( ka > kb ) { return  1 ; }
+                return 0 ;
+            } ) ;
+        }
+
+        const separator = this.#indentUnit === "" ? ":" : ": " ;
+
+        return this.#renderObject(
+            properties ,
+            prefix ,
+            ( property , childPrefix ) =>
+            {
+                if ( property.computed )
+                {
+                    throw new EdenTypeError(
+                        "Serialization of computed property keys is not yet implemented."
+                    ) ;
+                }
+                if ( property.shorthand )
+                {
+                    throw new EdenTypeError(
+                        "Serialization of shorthand properties is not yet implemented."
+                    ) ;
+                }
+                return this.#serializePropertyKey( property.key )
+                     + separator
+                     + this.#serializeNode( property.value , childPrefix ) ;
+            }
+        ) ;
+    }
+
+    /**
+     * Serializes a runtime JavaScript plain object.
+     *
+     * Iterates own enumerable string keys via `Object.keys()` (so
+     * Symbols are skipped, mirroring `JSON.stringify`). With
+     * `sortKeys: true`, keys are sorted before emission. Under
+     * `jsonCompatible`, entries whose value is `undefined` are
+     * dropped (SPEC §6.1).
+     *
+     * @param   {object} obj
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeObjectValue( obj , prefix )
+    {
+        let keys = Object.keys( obj ) ;
+
+        if ( this.#options.jsonCompatible )
+        {
+            keys = keys.filter( ( k ) => obj[ k ] !== undefined ) ;
+        }
+        if ( this.#options.sortKeys )
+        {
+            keys = [ ...keys ].sort() ;
+        }
+
+        const separator = this.#indentUnit === "" ? ":" : ": " ;
+
+        return this.#renderObject(
+            keys ,
+            prefix ,
+            ( key , childPrefix ) =>
+                this.#renderKey( key )
+              + separator
+              + this.#serializeValue( obj[ key ] , childPrefix )
+        ) ;
+    }
+
+    /**
      * Serializes a `Program` node. Data-mode programs with a body of
      * at most one element are accepted; the multi-statement eval-mode
      * path lands in sub-step 4.6.
@@ -309,6 +523,73 @@ export default class Serializer
             ) ;
         }
         return this.#serializeNode( node.body[ 0 ] , prefix ) ;
+    }
+
+    /**
+     * Serializes a `Property.key` AST node — used by
+     * `#serializeObjectExpression` to emit the left-hand side of each
+     * entry.
+     *
+     * Three node shapes are accepted in data mode:
+     *   - `Identifier` — emitted unquoted under `unquotedKeys`, else
+     *     quoted; `jsonCompatible` always quotes with double quotes.
+     *   - `Literal { kind: "string" }` — delegated to the string
+     *     literal path, which already applies the option-B raw
+     *     preservation rule from sub-step 4.2.
+     *   - `Literal { kind: "number" }` — original `raw` lexeme
+     *     preserved (e.g. `0xFF`), or recomputed as a decimal when
+     *     the value fits the unquoted numeric-key shape, otherwise
+     *     quoted. `jsonCompatible` forces a JSON-quoted string of
+     *     the runtime value.
+     *
+     * @param   {{ type: string, name?: string, value?: *, raw?: string, kind?: string }} keyNode
+     * @returns {string}
+     */
+    #serializePropertyKey( keyNode )
+    {
+        if ( keyNode.type === NodeType.IDENTIFIER )
+        {
+            if ( this.#options.jsonCompatible )
+            {
+                return quoteJSON( keyNode.name ) ;
+            }
+            if ( this.#options.unquotedKeys )
+            {
+                return keyNode.name ;
+            }
+            const quoteChar = this.#options.quotes === "single" ? "'" : "\"" ;
+            return quoteString( keyNode.name , quoteChar ) ;
+        }
+
+        if ( keyNode.type === NodeType.LITERAL )
+        {
+            if ( keyNode.kind === LiteralKind.STRING )
+            {
+                return this.#serializeStringLiteralNode( keyNode ) ;
+            }
+            if ( keyNode.kind === LiteralKind.NUMBER )
+            {
+                if ( this.#options.jsonCompatible )
+                {
+                    return quoteJSON( String( keyNode.value ) ) ;
+                }
+                if ( typeof keyNode.raw === "string" && keyNode.raw.length > 0 )
+                {
+                    return keyNode.raw ;
+                }
+                const asString = String( keyNode.value ) ;
+                if ( NUMERIC_KEY_RE.test( asString ) )
+                {
+                    return asString ;
+                }
+                const quoteChar = this.#options.quotes === "single" ? "'" : "\"" ;
+                return quoteString( asString , quoteChar ) ;
+            }
+        }
+
+        throw new EdenTypeError(
+            `Cannot serialize property key of type "${ keyNode.type }".`
+        ) ;
     }
 
     /**
@@ -388,9 +669,9 @@ export default class Serializer
     /**
      * Serializes a runtime JavaScript value.
      *
-     * Sub-steps 4.1 through 4.3 cover `null`, `undefined`, booleans,
-     * numbers, BigInts, strings and arrays. Plain objects raise
-     * `EdenTypeError` until sub-step 4.4 lands.
+     * Sub-steps 4.1 through 4.4 cover the full data-mode value space:
+     * `null`, `undefined`, booleans, numbers, BigInts, strings,
+     * arrays and plain objects.
      *
      * @param   {*}      value
      * @param   {string} prefix - Indentation prefix of the enclosing container.
@@ -430,9 +711,7 @@ export default class Serializer
                 {
                     return this.#serializeArrayValue( value , prefix ) ;
                 }
-                throw new EdenTypeError(
-                    "Serialization of plain object values is not yet implemented."
-                ) ;
+                return this.#serializeObjectValue( value , prefix ) ;
             }
             default :
             {

@@ -89,11 +89,244 @@ describe( "stringify — bigint" , () =>
     } ) ;
 } ) ;
 
-describe( "stringify — not yet implemented" , () =>
+describe( "stringify — objects inline (default)" , () =>
 {
-    test( "plain object values raise EdenTypeError" , () =>
+    test( "empty object"                         , () => { expect( stringify( {}                ) ).toBe( "{}"           ) ; } ) ;
+    test( "single identifier key"                , () => { expect( stringify( { a: 1 }          ) ).toBe( "{a:1}"        ) ; } ) ;
+    test( "multiple identifier keys preserve insertion order" , () =>
     {
-        expect( () => stringify( { a: 1 } ) ).toThrow( EdenTypeError ) ;
+        expect( stringify( { a: 1 , b: 2 , c: 3 } ) ).toBe( "{a:1,b:2,c:3}" ) ;
+    } ) ;
+    test( "nested object"                        , () => { expect( stringify( { a: { b: 1 } }    ) ).toBe( "{a:{b:1}}"   ) ; } ) ;
+    test( "object inside array"                  , () => { expect( stringify( [ { a: 1 } ]       ) ).toBe( "[{a:1}]"     ) ; } ) ;
+    test( "string value uses default double quotes" , () =>
+    {
+        expect( stringify( { a: "x" } ) ).toBe( "{a:\"x\"}" ) ;
+    } ) ;
+    test( "undefined value preserved by default" , () => { expect( stringify( { a: undefined }   ) ).toBe( "{a:undefined}" ) ; } ) ;
+    test( "key with spaces quoted"               , () => { expect( stringify( { "key with space": 1 } ) ).toBe( "{\"key with space\":1}" ) ; } ) ;
+    test( "key starting with digit quoted (except pure integer)" , () =>
+    {
+        expect( stringify( { "1abc": 1 } ) ).toBe( "{\"1abc\":1}" ) ;
+    } ) ;
+    test( "value keyword as key is quoted (null)"     , () => { expect( stringify( { "null"     : 1 } ) ).toBe( "{\"null\":1}"     ) ; } ) ;
+    test( "value keyword as key is quoted (undefined)", () => { expect( stringify( { "undefined": 1 } ) ).toBe( "{\"undefined\":1}") ; } ) ;
+    test( "operation keyword as key is quoted (new)"  , () => { expect( stringify( { "new"      : 1 } ) ).toBe( "{\"new\":1}"      ) ; } ) ;
+    test( "ECMAScript reserved word as key is quoted" , () => { expect( stringify( { "class"    : 1 } ) ).toBe( "{\"class\":1}"    ) ; } ) ;
+    test( "non-negative integer key emitted unquoted" , () =>
+    {
+        expect( stringify( { 0: "a" , 42: "b" } ) ).toBe( "{0:\"a\",42:\"b\"}" ) ;
+    } ) ;
+    test( "key with leading zero quoted" , () =>
+    {
+        expect( stringify( { "01": "a" } ) ).toBe( "{\"01\":\"a\"}" ) ;
+    } ) ;
+    test( "decimal-like key quoted" , () =>
+    {
+        expect( stringify( { "1.5": "a" } ) ).toBe( "{\"1.5\":\"a\"}" ) ;
+    } ) ;
+    test( "$ and _ identifier keys unquoted" , () =>
+    {
+        expect( stringify( { $foo: 1 , _bar: 2 } ) ).toBe( "{$foo:1,_bar:2}" ) ;
+    } ) ;
+    test( "non-ASCII identifier (café) unquoted via Unicode ID_Start" , () =>
+    {
+        expect( stringify( { café: 1 } ) ).toBe( "{café:1}" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — objects multi-line indented" , () =>
+{
+    test( "indent: 2 with one key" , () =>
+    {
+        expect( stringify( { a: 1 } , { indent: 2 } ) ).toBe( "{\n  a: 1\n}" ) ;
+    } ) ;
+    test( "indent: 2 with multiple keys, space after colon" , () =>
+    {
+        expect( stringify( { a: 1 , b: 2 } , { indent: 2 } ) ).toBe( "{\n  a: 1,\n  b: 2\n}" ) ;
+    } ) ;
+    test( "empty object stays compact under indent" , () =>
+    {
+        expect( stringify( {} , { indent: 2 } ) ).toBe( "{}" ) ;
+    } ) ;
+    test( "nested object accumulates indentation" , () =>
+    {
+        expect( stringify( { a: { b: 1 } } , { indent: 2 } ) ).toBe( "{\n  a: {\n    b: 1\n  }\n}" ) ;
+    } ) ;
+    test( "object inside indented array" , () =>
+    {
+        expect( stringify( [ { a: 1 } ] , { indent: 2 } ) ).toBe( "[\n  {\n    a: 1\n  }\n]" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — objects, unquotedKeys: false" , () =>
+{
+    test( "all identifier keys quoted with double quotes by default" , () =>
+    {
+        expect( stringify( { a: 1 , b: 2 } , { unquotedKeys: false } ) ).toBe( "{\"a\":1,\"b\":2}" ) ;
+    } ) ;
+    test( "all identifier keys quoted with single quotes when requested" , () =>
+    {
+        expect( stringify( { a: 1 } , { unquotedKeys: false , quotes: "single" } ) ).toBe( "{'a':1}" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — objects, sortKeys" , () =>
+{
+    test( "keys sorted lexicographically (value path)" , () =>
+    {
+        expect( stringify( { b: 1 , a: 2 , c: 3 } , { sortKeys: true } ) ).toBe( "{a:2,b:1,c:3}" ) ;
+    } ) ;
+    test( "numeric keys sort by string order" , () =>
+    {
+        expect( stringify( { 10: "a" , 2: "b" } , { sortKeys: true } ) ).toBe( "{10:\"a\",2:\"b\"}" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — objects, trailingCommas" , () =>
+{
+    test( "trailingCommas ignored in inline form" , () =>
+    {
+        expect( stringify( { a: 1 , b: 2 } , { trailingCommas: true } ) ).toBe( "{a:1,b:2}" ) ;
+    } ) ;
+    test( "trailingCommas applied in multi-line form" , () =>
+    {
+        expect( stringify( { a: 1 , b: 2 } , { indent: 2 , trailingCommas: true } ) ).toBe( "{\n  a: 1,\n  b: 2,\n}" ) ;
+    } ) ;
+    test( "trailingCommas suppressed under jsonCompatible" , () =>
+    {
+        expect( stringify( { a: 1 , b: 2 } , { indent: 2 , trailingCommas: true , jsonCompatible: true } ) ).toBe(
+            "{\n  \"a\": 1,\n  \"b\": 2\n}"
+        ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — objects, jsonCompatible" , () =>
+{
+    test( "all keys quoted with double quotes" , () =>
+    {
+        expect( stringify( { a: 1 , 0: "x" } , { jsonCompatible: true } ) ).toBe( "{\"0\":\"x\",\"a\":1}" ) ;
+    } ) ;
+    test( "undefined value dropped" , () =>
+    {
+        expect( stringify( { a: 1 , b: undefined , c: 2 } , { jsonCompatible: true } ) ).toBe( "{\"a\":1,\"c\":2}" ) ;
+    } ) ;
+    test( "NaN value collapses to null" , () =>
+    {
+        expect( stringify( { a: Number.NaN } , { jsonCompatible: true } ) ).toBe( "{\"a\":null}" ) ;
+    } ) ;
+    test( "BigInt value still throws" , () =>
+    {
+        expect( () => stringify( { a: 1n } , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+    test( "JSON.parse round-trip preserves value" , () =>
+    {
+        const original = { a: 1 , b: "hi" , nested: { c: [ 1 , 2 , null ] } } ;
+        const encoded  = stringify( original , { jsonCompatible: true , indent: 2 } ) ;
+        expect( JSON.parse( encoded ) ).toEqual( original ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — ObjectExpression" , () =>
+{
+    test.each(
+    [
+        [ "{}"                              ] ,
+        [ "{a:1}"                           ] ,
+        [ "{a:1,b:2}"                       ] ,
+        [ "{0:\"x\"}"                       ] ,
+        [ "{0xFF:1}"                        ] ,
+        [ "{a:{b:[1,2]}}"                   ]
+    ] )( "round trip of %p preserves inline form and raw lexemes" , ( source ) =>
+    {
+        const program = parseToAST( source ) ;
+        expect( stringifyAST( program ) ).toBe( source ) ;
+    } ) ;
+
+    test( "string-quoted key kept under unquotedKeys (option B, fidelity)" , () =>
+    {
+        const program = parseToAST( "{\"foo\":1}" ) ;
+        expect( stringifyAST( program ) ).toBe( "{\"foo\":1}" ) ;
+    } ) ;
+
+    test( "string-quoted key recomputed when quote style mismatches" , () =>
+    {
+        const program = parseToAST( "{'foo':1}" ) ;
+        expect( stringifyAST( program ) ).toBe( "{\"foo\":1}" ) ;
+    } ) ;
+
+    test( "Identifier key forced into quoted form under unquotedKeys: false" , () =>
+    {
+        const program = parseToAST( "{a:1}" ) ;
+        expect( stringifyAST( program , { unquotedKeys: false } ) ).toBe( "{\"a\":1}" ) ;
+    } ) ;
+
+    test( "ObjectExpression sortKeys reorders properties" , () =>
+    {
+        const program = parseToAST( "{b:1,a:2}" ) ;
+        expect( stringifyAST( program , { sortKeys: true } ) ).toBe( "{a:2,b:1}" ) ;
+    } ) ;
+
+    test( "ObjectExpression jsonCompatible drops Literal undefined values" , () =>
+    {
+        const program = parseToAST( "{a:1,b:undefined,c:3}" ) ;
+        expect( stringifyAST( program , { jsonCompatible: true } ) ).toBe( "{\"a\":1,\"c\":3}" ) ;
+    } ) ;
+
+    test( "ObjectExpression indented at top level" , () =>
+    {
+        const program = parseToAST( "{a:1,b:2}" ) ;
+        expect( stringifyAST( program , { indent: 2 } ) ).toBe( "{\n  a: 1,\n  b: 2\n}" ) ;
+    } ) ;
+
+    test( "Number key preserves hex raw under defaults" , () =>
+    {
+        const program = parseToAST( "{0xFF:1}" ) ;
+        expect( stringifyAST( program ) ).toBe( "{0xFF:1}" ) ;
+    } ) ;
+
+    test( "Number key recomputed to decimal under jsonCompatible" , () =>
+    {
+        const program = parseToAST( "{0xFF:1}" ) ;
+        expect( stringifyAST( program , { jsonCompatible: true } ) ).toBe( "{\"255\":1}" ) ;
+    } ) ;
+
+    test( "Constructed Property with computed:true throws" , () =>
+    {
+        const node =
+        {
+            type       : NodeType.OBJECT_EXPRESSION ,
+            properties :
+            [
+                {
+                    type      : "Property" ,
+                    key       : { type: NodeType.IDENTIFIER , name: "x" } ,
+                    value     : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER } ,
+                    shorthand : false ,
+                    computed  : true
+                }
+            ]
+        } ;
+        expect( () => stringifyAST( node ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "Constructed Property with shorthand:true throws" , () =>
+    {
+        const node =
+        {
+            type       : NodeType.OBJECT_EXPRESSION ,
+            properties :
+            [
+                {
+                    type      : "Property" ,
+                    key       : { type: NodeType.IDENTIFIER , name: "x" } ,
+                    value     : { type: NodeType.IDENTIFIER , name: "x" } ,
+                    shorthand : true ,
+                    computed  : false
+                }
+            ]
+        } ;
+        expect( () => stringifyAST( node ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
 
@@ -481,12 +714,13 @@ describe( "stringifyAST — guards" , () =>
 
     test( "unsupported AST node type throws EdenTypeError" , () =>
     {
-        const fakeObject =
+        const fakeUnary =
         {
-            type       : NodeType.OBJECT_EXPRESSION ,
-            properties : []
+            type     : NodeType.UNARY_EXPRESSION ,
+            operator : "-" ,
+            argument : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER , raw: "1" }
         } ;
-        expect( () => stringifyAST( fakeObject ) ).toThrow( EdenTypeError ) ;
+        expect( () => stringifyAST( fakeUnary ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
 
