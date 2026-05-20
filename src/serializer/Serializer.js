@@ -8,15 +8,16 @@
  * trip is the contract that drives its design (see ARCHITECTURE.md
  * §2.3).
  *
- * Coverage as of sub-step 4.4: scaffolding, scalar literals (`null`,
- * `undefined`, booleans, numbers, BigInts), strings and templates,
- * arrays and plain objects (both inline-compact and multi-line
- * indented forms, with quoted/unquoted key selection, sorting and
- * trailing-comma control). Unary expressions and eval-mode nodes
- * are wired in subsequent sub-steps; encountering one of those
- * raises `EdenTypeError` with an explicit "not yet implemented"
- * message so callers fail loudly rather than silently dropping
- * data.
+ * Coverage as of sub-step 4.5: the full data-mode value space —
+ * scalar literals (`null`, `undefined`, booleans, numbers,
+ * BigInts), strings and templates, arrays, plain objects, and
+ * `UnaryExpression` nodes for `+/-` in front of numeric literals.
+ * Eval-mode nodes (`Identifier`, `MemberExpression`,
+ * `CallExpression`, `NewExpression`, `AssignmentStatement`, and
+ * the multi-statement `Program`) are wired in subsequent
+ * sub-steps; encountering one of those raises `EdenTypeError` with
+ * an explicit "not yet implemented" message so callers fail loudly
+ * rather than silently dropping data.
  *
  * The class is exposed within the package but is **not** part of the
  * public API — consumers should import `stringify()` or
@@ -315,10 +316,10 @@ export default class Serializer
 
     /**
      * Dispatches AST node serialization on `node.type`. As of
-     * sub-step 4.4, supported types are `Program`, `Literal`,
-     * `ArrayExpression` and `ObjectExpression`; every other node
-     * type raises `EdenTypeError` until its dedicated sub-step
-     * lands.
+     * sub-step 4.5, supported types are `Program`, `Literal`,
+     * `ArrayExpression`, `ObjectExpression` and `UnaryExpression`;
+     * every other node type raises `EdenTypeError` until its
+     * dedicated sub-step lands.
      *
      * @param   {{type: string}} node
      * @param   {string}         prefix - Indentation prefix of the enclosing container.
@@ -352,6 +353,13 @@ export default class Serializer
             {
                 return this.#serializeObjectExpression(
                     /** @type {import("../parser/ast/createObjectExpression.js").ObjectExpression} */ ( node ) ,
+                    prefix
+                ) ;
+            }
+            case NodeType.UNARY_EXPRESSION :
+            {
+                return this.#serializeUnaryExpression(
+                    /** @type {import("../parser/ast/createUnaryExpression.js").UnaryExpression} */ ( node ) ,
                     prefix
                 ) ;
             }
@@ -664,6 +672,46 @@ export default class Serializer
             return raw ;
         }
         return quoteTemplate( node.value ) ;
+    }
+
+    /**
+     * Serializes a `UnaryExpression` AST node.
+     *
+     * In data mode the argument is always a `Literal` of kind
+     * `number` or `bigint` (SPEC §3.1 `UnaryValue`); the standard
+     * path emits `operator` followed by the recursively serialized
+     * argument, which keeps the original `raw` lexeme (separators,
+     * hex/binary/octal bases, etc.) thanks to `#serializeLiteralNode`.
+     *
+     * Under `jsonCompatible`, the effective numeric value is
+     * computed up front so that `NaN` and `±Infinity` collapse to
+     * `null` and `BigInt` raises `EdenTypeError` — otherwise we
+     * would emit `-null`, which is not valid JSON.
+     *
+     * @param   {import("../parser/ast/createUnaryExpression.js").UnaryExpression} node
+     * @param   {string} prefix
+     * @returns {string}
+     */
+    #serializeUnaryExpression( node , prefix )
+    {
+        const { argument , operator }    = node ;
+        const { type , kind , value }    = argument ?? {} ;
+
+        if ( this.#options.jsonCompatible && type === NodeType.LITERAL )
+        {
+            const effective = operator === "-" ? -value : value ;
+
+            if ( kind === LiteralKind.NUMBER )
+            {
+                return this.#serializeNumber( effective ) ;
+            }
+            if ( kind === LiteralKind.BIGINT )
+            {
+                return this.#serializeBigInt( effective ) ;
+            }
+        }
+
+        return operator + this.#serializeNode( argument , prefix ) ;
     }
 
     /**

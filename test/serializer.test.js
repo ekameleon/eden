@@ -714,13 +714,13 @@ describe( "stringifyAST — guards" , () =>
 
     test( "unsupported AST node type throws EdenTypeError" , () =>
     {
-        const fakeUnary =
+        const fakeCall =
         {
-            type     : NodeType.UNARY_EXPRESSION ,
-            operator : "-" ,
-            argument : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER , raw: "1" }
+            type      : NodeType.CALL_EXPRESSION ,
+            callee    : { type: NodeType.IDENTIFIER , name: "foo" } ,
+            arguments : []
         } ;
-        expect( () => stringifyAST( fakeUnary ) ).toThrow( EdenTypeError ) ;
+        expect( () => stringifyAST( fakeCall ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
 
@@ -816,5 +816,61 @@ describe( "stringifyAST — Program node" , () =>
             ]
         } ;
         expect( () => stringifyAST( program ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — UnaryExpression" , () =>
+{
+    test.each(
+    [
+        [ "-1"        ] ,
+        [ "+1"        ] ,
+        [ "-1.5"      ] ,
+        [ "-1e10"     ] ,
+        [ "-Infinity" ] ,
+        [ "+Infinity" ] ,
+        [ "-NaN"      ] ,
+        [ "-1n"       ] ,
+        [ "+1n"       ] ,
+        [ "-9007199254740993n" ] ,
+        [ "-1_000n"   ] ,
+        [ "-0xFF"     ] ,
+        [ "+0o17"     ] ,
+        [ "-0b1010"   ]
+    ] )( "round trip of %p preserves operator and argument raw" , ( source ) =>
+    {
+        const program = parseToAST( source ) ;
+        expect( stringifyAST( program ) ).toBe( source ) ;
+    } ) ;
+
+    test( "indent does not break a unary scalar onto a new line" , () =>
+    {
+        const program = parseToAST( "-1" ) ;
+        expect( stringifyAST( program , { indent: 2 } ) ).toBe( "-1" ) ;
+    } ) ;
+
+    test( "constructed UnaryExpression without raw uses recomputed argument" , () =>
+    {
+        const node =
+        {
+            type     : NodeType.UNARY_EXPRESSION ,
+            operator : "-" ,
+            argument : { type: NodeType.LITERAL , value: 5 , kind: LiteralKind.NUMBER }
+        } ;
+        expect( stringifyAST( node ) ).toBe( "-5" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringifyAST — UnaryExpression under jsonCompatible" , () =>
+{
+    test( "-Infinity collapses to null"          , () => { expect( stringifyAST( parseToAST( "-Infinity" ) , { jsonCompatible: true } ) ).toBe( "null" ) ; } ) ;
+    test( "+Infinity collapses to null"          , () => { expect( stringifyAST( parseToAST( "+Infinity" ) , { jsonCompatible: true } ) ).toBe( "null" ) ; } ) ;
+    test( "-NaN collapses to null"               , () => { expect( stringifyAST( parseToAST( "-NaN"      ) , { jsonCompatible: true } ) ).toBe( "null" ) ; } ) ;
+    test( "-1 remains -1"                        , () => { expect( stringifyAST( parseToAST( "-1"        ) , { jsonCompatible: true } ) ).toBe( "-1"   ) ; } ) ;
+    test( "-1.5 remains -1.5"                    , () => { expect( stringifyAST( parseToAST( "-1.5"      ) , { jsonCompatible: true } ) ).toBe( "-1.5" ) ; } ) ;
+    test( "-0xFF normalized to -255"             , () => { expect( stringifyAST( parseToAST( "-0xFF"     ) , { jsonCompatible: true } ) ).toBe( "-255" ) ; } ) ;
+    test( "-1n raises EdenTypeError"             , () =>
+    {
+        expect( () => stringifyAST( parseToAST( "-1n" ) , { jsonCompatible: true } ) ).toThrow( EdenTypeError ) ;
     } ) ;
 } ) ;
