@@ -15,7 +15,7 @@ import evaluateDataNode from "./helpers/evaluateDataNode.js" ;
  * Passing `options.mode === "eval"` is an API misuse and raises
  * `EdenTypeError`; use `eden.evaluate()` for eval-mode sources.
  *
- * By default an empty source yields `undefined`. Set
+ * By default, an empty source yields `undefined`. Set
  * `options.allowEmptySource: false` to make `parse("")` throw
  * `EdenSyntaxError` instead.
  *
