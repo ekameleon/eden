@@ -8,12 +8,32 @@ focuses on **how to use** eden from consuming code.
 
 ## Chapters
 
-- [Getting started](./getting-started.md)
+### Start here
+
+- [Getting started](./getting-started.md) — install, first parse, two modes
+- [Data mode vs evaluation mode](./data-mode.md) — the safe pair `parse` / `stringify`
+- [Evaluation mode](./evaluation-mode.md) — `evaluate`, scope, policy
+
+### Public API
+
+- [Data mode — `parse` and `parseToAST`](./data-mode.md)
+- [Stringify — `stringify` and `stringifyAST`](./stringify.md)
+- [Evaluation mode — `evaluate`](./evaluation-mode.md)
+- [Security policy](./security-policy.md)
+- [JSON interop — `fromJSON` and `toJSON`](./json-interop.md)
+- [Tokenize — the low-level lexer entry point](./tokenize.md)
+- [Errors — typed hierarchy](./errors.md)
+
+### Language features
+
 - [Strings and templates](./strings-and-templates.md)
-- Data mode — `parse` / `stringify` *(coming soon)*
-- Evaluation mode — `evaluate`, scope and security policy *(coming soon)*
-- JSON interop — `fromJSON` / `toJSON` *(coming soon)*
-- API reference *(coming soon)*
+- [Numbers and BigInt](./numbers.md)
+- [Objects and arrays](./objects-and-arrays.md)
+- [Comments](./comments.md)
+
+### Tooling reference
+
+- [AST reference — node shapes for formatters and LSPs](./ast-reference.md)
 
 ## Language
 

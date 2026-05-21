@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-05-21
+
+First public release. Ships the full grammar, the data-mode and
+eval-mode pipelines, JSON interop, a benchmark harness, and the
+human documentation in English and French.
+
 ### Added
 
 - CI workflow and conformance fixture harness (#1).
@@ -79,3 +85,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scope` and `policy` carried by `options`. `ParseOptions` and
   `EvaluateOptions` share the same options bag and are forwarded
   to their respective consumers (#7).
+- Documentation tree expanded under [`doc/en/`](./doc/en) and
+  [`doc/fr/`](./doc/fr): one focused page per public feature
+  (data mode, stringify, evaluation mode, security policy, JSON
+  interop, numbers, objects and arrays, comments, errors,
+  tokenize, AST reference). The English and French trees are
+  kept in strict parity. The root `README.md` gets a
+  Performance section, a Tooling APIs section, an Errors
+  section, and the roadmap moves to a dedicated
+  [`ROADMAP.md`](./ROADMAP.md) (#10).
+
+[Unreleased]: https://github.com/ekameleon/eden/compare/0.1.0...HEAD
+[0.1.0]: https://github.com/ekameleon/eden/releases/tag/0.1.0

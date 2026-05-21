@@ -94,14 +94,59 @@ const result = evaluate(
 ```js
 import { toJSON, fromJSON } from "@ekameleon/eden";
 
-const jsonText = toJSON(edenValue, { jsonCompatible: true });
-const edenText = fromJSON(jsonSource);
+const jsonText = toJSON(edenValue);                  // strict JSON output
+const edenText = fromJSON(jsonSource, { indent: 2 }); // pretty eden output
 ```
+
+### Tooling APIs
+
+For formatters, language servers, syntax highlighters and any other
+tool that needs to operate on the AST rather than on runtime values,
+eden exposes three lower-level entry points:
+
+```js
+import { parseToAST, stringifyAST, tokenize } from "@ekameleon/eden";
+
+const ast    = parseToAST(source);            // walkable AST
+const back   = stringifyAST(ast, { indent: 2 }); // round-trippable
+const tokens = tokenize(source);              // raw token stream
+```
+
+See the [tooling guide](./doc/en/ast-reference.md) for the AST node
+shapes and the [tokenize guide](./doc/en/tokenize.md) for the token
+stream layout.
+
+### Typed errors
+
+Every failure raised by the library extends `EdenError`, which itself
+extends the native `Error`. Catch the base class for blanket handling,
+or the specific subclass to react on the failure mode:
+
+```js
+import { parse, EdenSyntaxError } from "@ekameleon/eden";
+
+try
+{
+    parse(maybeBroken);
+}
+catch (error)
+{
+    if (error instanceof EdenSyntaxError)
+    {
+        console.warn("Bad syntax at line", error.line, "column", error.column);
+    }
+}
+```
+
+The full hierarchy — `EdenSyntaxError`, `EdenReferenceError`,
+`EdenSecurityError`, `EdenTypeError` — is documented in
+[`doc/en/errors.md`](./doc/en/errors.md).
 
 ## API
 
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full public API and
-option reference.
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the public API surface
+and the option reference, and the [documentation tree](./doc/en/) for
+worked examples of every feature.
 
 ## Documentation
 
@@ -146,6 +191,17 @@ No change to the harness or to any registry is required — the next
 These fixtures are the source of truth shared with the future PHP port,
 so please keep them minimal, focused on one feature each, and stable.
 
+### Benchmarks
+
+The repository ships a zero-dependency micro-bench harness under
+[`bench/`](./bench). Run `bun run bench` to compare `eden.parse` /
+`eden.stringify` against the native `JSON.parse` / `JSON.stringify`
+on five representative payloads. On a typical machine, eden runs at
+roughly 6–12% of native JSON throughput, climbing higher on
+string-dominated workloads — JS-level cost of a richer grammar
+versus a C-level implementation of JSON, no surprise. Numbers are
+machine-dependent and the bench is intentionally not wired into CI.
+
 ## Grammar
 
 - [`SPEC.md`](./SPEC.md) — normative grammar and semantics (prose form)
@@ -159,18 +215,8 @@ so please keep them minimal, focused on one feature each, and stable.
 
 ## Roadmap
 
-- [x] Specification (grammar + semantics)
-- [x] Lexer
-- [x] Parser + AST
-- [ ] Serializer
-- [ ] `parse` / `stringify` public API
-- [ ] Evaluator with scope & security policy
-- [ ] `evaluate` public API
-- [ ] JSON convertors
-- [ ] Benchmarks vs `JSON.parse`
-- [ ] PHP port (same conformance fixtures)
-- [ ] VS Code syntax highlighting
-- [ ] LSP (formatter + linter)
+See [`ROADMAP.md`](./ROADMAP.md) for shipped milestones and the
+post-v0.1.0 ideas list.
 
 ## History
 
