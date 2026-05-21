@@ -1,14 +1,20 @@
 /**
  * @file Security policy gate for the evaluator.
  *
- * As of sub-step 6.1 this class is a thin wrapper that holds the
- * resolved policy options. The actual allow/deny logic (glob
- * matching against the `authorized` list, `allowFunctionCall` /
- * `allowConstructor` checks, `onDenied` hook) lands in sub-step
- * 6.3 — keeping the file in place now fixes the import paths for
- * the rest of the evaluator surface and avoids a noisy refactor
- * later.
+ * The policy controls **invocations** — function calls and
+ * constructors — not plain reads. Once a value sits on the scope
+ * the user explicitly placed it there, so reads are always
+ * allowed; only `CallExpression` and `NewExpression` consult the
+ * policy.
+ *
+ * Denial semantics follow ARCHITECTURE.md §6.3: the `onDenied`
+ * hook (if any) is fired with the path that was denied, and the
+ * configured `undefineable` value is returned. Default
+ * `undefineable: undefined`, so denied calls silently no-op. Users
+ * who want a hard failure can throw from `onDenied`.
  */
+
+import matchAuthorizedGlob from "./helpers/matchAuthorizedGlob.js" ;
 
 /**
  * Security policy. The class is internal and not part of the public
@@ -22,6 +28,53 @@ export default class SecurityPolicy
     constructor( options )
     {
         this.#options = options ;
+    }
+
+    /**
+     * Tells whether `path` may be invoked as a function. Requires
+     * both `allowFunctionCall` to be true and `path` to match an
+     * entry in `authorized`.
+     *
+     * @param   {string} path - Dotted path string, e.g. `"Math.sqrt"`.
+     * @returns {boolean}
+     */
+    canCall( path )
+    {
+        const { allowFunctionCall , authorized } = this.#options ;
+        return allowFunctionCall && matchAuthorizedGlob( path , authorized ) ;
+    }
+
+    /**
+     * Tells whether `path` may be invoked as a constructor. Requires
+     * both `allowConstructor` to be true and `path` to match an
+     * entry in `authorized`.
+     *
+     * @param   {string} path
+     * @returns {boolean}
+     */
+    canConstruct( path )
+    {
+        const { allowConstructor , authorized } = this.#options ;
+        return allowConstructor && matchAuthorizedGlob( path , authorized ) ;
+    }
+
+    /**
+     * Handles a denial: fires the `onDenied` hook (when set) and
+     * returns the configured `undefineable` value. Callers use the
+     * returned value as the runtime result of the denied
+     * invocation.
+     *
+     * @param   {string} path
+     * @returns {*}
+     */
+    handleDenial( path )
+    {
+        const { onDenied , undefineable } = this.#options ;
+        if ( typeof onDenied === "function" )
+        {
+            onDenied( path ) ;
+        }
+        return undefineable ;
     }
 
     /**
