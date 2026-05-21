@@ -8,12 +8,15 @@
  * `SecurityPolicy` raises `EdenSecurityError`, and any unresolved
  * identifier or path raises `EdenReferenceError`.
  *
- * Coverage as of sub-step 6.1: scaffolding only — `Literal` of
- * every `kind` and `Program` (data or eval) with a body of length
- * ≤ 1. Every other node type raises `EdenTypeError` with an
- * explicit "not yet implemented" message so callers fail loudly
- * rather than silently dropping data. The full surface lands sub-
- * step by sub-step through issue #6.
+ * Coverage as of sub-step 6.2: `Literal` of every `kind`,
+ * `Program` (data or eval) with a body of length ≤ 1, plus
+ * `Identifier` and `MemberExpression` reads — resolution walks
+ * the scope through `Scope.resolve()` and raises
+ * `EdenReferenceError` on any missing segment or descent through
+ * `null` / `undefined`. The security policy is not consulted yet
+ * (it lands in 6.3). Every other node type raises `EdenTypeError`
+ * with an explicit "not yet implemented" message so callers fail
+ * loudly rather than silently dropping data.
  *
  * The class is exposed within the package but is **not** part of
  * the public API — consumers should import the (future) `evaluate()`
@@ -55,6 +58,52 @@ export default class Evaluator
     #scope ;
 
     /**
+     * Walks an `Identifier` / `MemberExpression` chain and returns
+     * the flat list of path segments to feed `Scope.resolve()`.
+     *
+     * Computed `MemberExpression` segments must be `Literal` of
+     * kind `string` or `number` (SPEC §3.3); numeric values are
+     * coerced to their string form so `arr[0]` and `arr["0"]` walk
+     * the same path.
+     *
+     * @param   {{type: string}} node
+     * @returns {string[]}
+     */
+    #collectPath( node )
+    {
+        const { type } = node ;
+
+        if ( type === NodeType.IDENTIFIER )
+        {
+            return [ node.name ] ;
+        }
+        if ( type === NodeType.MEMBER_EXPRESSION )
+        {
+            const { object , property , computed } = node ;
+            const head    = this.#collectPath( object ) ;
+            const segment = computed
+                ? String( property.value )
+                : property.name ;
+            return [ ...head , segment ] ;
+        }
+        throw new EdenTypeError(
+            "Cannot use " + type + " as a member-path segment."
+        ) ;
+    }
+
+    /**
+     * Evaluates an `Identifier` node by resolving it as a one-segment
+     * path against the scope.
+     *
+     * @param   {import("../parser/ast/createIdentifier.js").Identifier} node
+     * @returns {*}
+     */
+    #evaluateIdentifier( node )
+    {
+        return this.#scope.resolve( [ node.name ] ) ;
+    }
+
+    /**
      * Evaluates a `Literal` node. The parser has already resolved
      * every escape sequence and numeric base, so the runtime value
      * is exactly `node.value`.
@@ -68,9 +117,24 @@ export default class Evaluator
     }
 
     /**
-     * Dispatches AST evaluation on `node.type`. As of sub-step 6.1
-     * only `Program` and `Literal` are supported; every other node
-     * type raises `EdenTypeError`.
+     * Evaluates a `MemberExpression` node by collecting its full
+     * dotted/computed path and resolving it through the scope in a
+     * single shot. Each path segment is a string — numeric indices
+     * are coerced to their string form by `#collectPath`.
+     *
+     * @param   {import("../parser/ast/createMemberExpression.js").MemberExpression} node
+     * @returns {*}
+     */
+    #evaluateMemberExpression( node )
+    {
+        return this.#scope.resolve( this.#collectPath( node ) ) ;
+    }
+
+    /**
+     * Dispatches AST evaluation on `node.type`. As of sub-step 6.2
+     * supported types are `Program`, `Literal`, `Identifier` and
+     * `MemberExpression`; every other node type raises
+     * `EdenTypeError`.
      *
      * @param   {{type: string}} node
      * @returns {*}
@@ -89,6 +153,18 @@ export default class Evaluator
             {
                 return this.#evaluateLiteral(
                     /** @type {import("../parser/ast/createLiteral.js").Literal} */ ( node )
+                ) ;
+            }
+            case NodeType.IDENTIFIER :
+            {
+                return this.#evaluateIdentifier(
+                    /** @type {import("../parser/ast/createIdentifier.js").Identifier} */ ( node )
+                ) ;
+            }
+            case NodeType.MEMBER_EXPRESSION :
+            {
+                return this.#evaluateMemberExpression(
+                    /** @type {import("../parser/ast/createMemberExpression.js").MemberExpression} */ ( node )
                 ) ;
             }
             default :
