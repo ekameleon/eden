@@ -30,9 +30,11 @@ describe( "public API — exports presence and shape" , () =>
         [ "fromJSON"        , "function" ] ,
         [ "toJSON"          , "function" ] ,
         [ "tokenize"        , "function" ] ,
-        [ "EdenError"       , "function" ] ,   // classes show up as `typeof === "function"`
-        [ "EdenSyntaxError" , "function" ] ,
-        [ "EdenTypeError"   , "function" ] ,
+        [ "EdenError"          , "function" ] ,   // classes show up as `typeof === "function"`
+        [ "EdenReferenceError" , "function" ] ,
+        [ "EdenSecurityError"  , "function" ] ,
+        [ "EdenSyntaxError"    , "function" ] ,
+        [ "EdenTypeError"      , "function" ] ,
         [ "TokenType"       , "object"   ] ,
         [ "NodeType"        , "object"   ] ,
         [ "LiteralKind"     , "object"   ] ,

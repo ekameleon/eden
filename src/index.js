@@ -9,9 +9,11 @@
  * @see https://github.com/ekameleon/eden
  */
 
-export { default as EdenError       } from "./errors/EdenError.js" ;
-export { default as EdenSyntaxError } from "./errors/EdenSyntaxError.js" ;
-export { default as EdenTypeError   } from "./errors/EdenTypeError.js" ;
+export { default as EdenError          } from "./errors/EdenError.js" ;
+export { default as EdenReferenceError } from "./errors/EdenReferenceError.js" ;
+export { default as EdenSecurityError  } from "./errors/EdenSecurityError.js" ;
+export { default as EdenSyntaxError    } from "./errors/EdenSyntaxError.js" ;
+export { default as EdenTypeError      } from "./errors/EdenTypeError.js" ;
 
 export { default as TokenType } from "./lexer/TokenType.js" ;
 export { default as tokenize  } from "./lexer/tokenize.js" ;

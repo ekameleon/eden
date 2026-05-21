@@ -48,3 +48,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the underlying `SyntaxError` preserved on the `cause` chain.
   `toJSON` always forces `jsonCompatible: true`, accepting (and
   silently neutralizing) any other `StringifyOptions` (#8).
+- `EdenReferenceError` and `EdenSecurityError` added to the
+  public error hierarchy in preparation for the evaluator
+  surface (#6).
