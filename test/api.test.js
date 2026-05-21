@@ -27,6 +27,8 @@ describe( "public API — exports presence and shape" , () =>
         [ "parseToAST"      , "function" ] ,
         [ "stringify"       , "function" ] ,
         [ "stringifyAST"    , "function" ] ,
+        [ "fromJSON"        , "function" ] ,
+        [ "toJSON"          , "function" ] ,
         [ "tokenize"        , "function" ] ,
         [ "EdenError"       , "function" ] ,   // classes show up as `typeof === "function"`
         [ "EdenSyntaxError" , "function" ] ,

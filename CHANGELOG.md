@@ -40,3 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   showcase — compare `eden.parse` / `eden.stringify` against
   `JSON.parse` / `JSON.stringify` and report ops/sec plus a
   ratio. Bench is manual: machine-dependent, no CI gating (#9).
+- `fromJSON(jsonSource, options?)` and `toJSON(value, options?)`
+  convenience utilities to convert between JSON and eden source
+  strings without touching the lower-level entry points.
+  `fromJSON` defers to native `JSON.parse` and re-emits via the
+  eden serializer; malformed JSON raises `EdenSyntaxError` with
+  the underlying `SyntaxError` preserved on the `cause` chain.
+  `toJSON` always forces `jsonCompatible: true`, accepting (and
+  silently neutralizing) any other `StringifyOptions` (#8).
