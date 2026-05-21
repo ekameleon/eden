@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Extended conformance fixtures: 12 new stringify fixtures cover
+  the full option matrix (indent variants, sortKeys, trailing
+  commas, single quotes, jsonCompatible substitutions,
+  unquotedKeys: false, BigInt + numeric bases, multi-line
+  templates, unary specials). A new eval fixture directory
+  (`test/fixtures/eval/`) lands with its own conformance harness
+  and 20 fixtures spanning identifier reads, member access,
+  allowed and denied invocations, assignments, composite
+  literals, shorthand and computed properties, unary expressions,
+  and expected reference errors. Fixture format documented in
+  the harness — `.scope.json` supports a `$include` whitelist
+  for JS globals (`Math`, `Date`, `Number`, …) and an
+  `.error.json` companion expresses "this fixture should throw
+  `EdenReferenceError`" without carrying executable code (#12).
+
 ## [0.1.0] - 2026-05-21
 
 First public release. Ships the full grammar, the data-mode and
