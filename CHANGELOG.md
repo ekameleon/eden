@@ -34,3 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shape, internal classes are confirmed hidden, and the two
   canonical round trips (`parse → stringify`, `parseToAST →
   stringifyAST`) are smoke-tested through the façade (#5).
+- Zero-dependency micro-bench harness under `bench/`, runnable
+  via `bun run bench`. Five representative cases — small object,
+  medium nested document, large array, long string, eden-feature
+  showcase — compare `eden.parse` / `eden.stringify` against
+  `JSON.parse` / `JSON.stringify` and report ops/sec plus a
+  ratio. Bench is manual: machine-dependent, no CI gating (#9).
