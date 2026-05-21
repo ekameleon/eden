@@ -17,6 +17,7 @@ import { describe , test , expect } from "bun:test" ;
 
 import {
     parseToAST ,
+    stringifyAST ,
     NodeType ,
     LiteralKind ,
     ProgramMode ,
@@ -855,5 +856,93 @@ describe( "evaluator — Program eval multi-statement" , () =>
             { scope: { Date } , policy }
         ) ;
         expect( result ).toBe( 2024 ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — integration" , () =>
+{
+    test( "user record built with assignment, new and member read" , () =>
+    {
+        const scope = { Date } ;
+        const policy =
+        {
+            allowConstructor : true ,
+            authorized       : [ "Date" ]
+        } ;
+        const source =
+            "user = { name: \"Marc\", joined: new Date(\"2024-01-15\") };\n"
+            + "user.active = true;\n"
+            + "user" ;
+
+        const result = evalProgram( source , { scope , policy } ) ;
+
+        expect( result.name              ).toBe( "Marc" ) ;
+        expect( result.active            ).toBe( true ) ;
+        expect( result.joined ).toBeInstanceOf( Date ) ;
+        expect( result.joined.toISOString().slice( 0 , 10 ) ).toBe( "2024-01-15" ) ;
+
+        // The scope's `user` property was created on the fly.
+        expect( scope.user ).toBe( result ) ;
+    } ) ;
+
+    test( "object literal mixing computed key, shorthand and array" , () =>
+    {
+        const scope = { key: "dynamic" , prefix: "Marc" } ;
+        const result = evalProgram(
+            "{ [key]: 1, prefix, items: [1, 2, 3] }" ,
+            { scope }
+        ) ;
+        expect( result ).toEqual(
+        {
+            dynamic : 1                ,
+            prefix  : "Marc"           ,
+            items   : [ 1 , 2 , 3 ]
+        } ) ;
+    } ) ;
+
+    test( "nested calls with permissive Math.* policy" , () =>
+    {
+        const scope = { Math } ;
+        const policy =
+        {
+            allowFunctionCall : true ,
+            authorized        : [ "Math.*" ]
+        } ;
+        const result = evalProgram(
+            "Math.sqrt(Math.pow(3, 2))" ,
+            { scope , policy }
+        ) ;
+        expect( result ).toBe( 3 ) ;
+    } ) ;
+
+    test( "denied call assigns the policy's undefineable value" , () =>
+    {
+        const denied = [] ;
+        const scope  = { forbidden: () => "would-be-secret" } ;
+        const policy =
+        {
+            allowFunctionCall : false ,
+            authorized        : [] ,
+            undefineable      : "DENIED-SENTINEL" ,
+            onDenied          : ( path ) => denied.push( path )
+        } ;
+        const result = evalProgram(
+            "result = forbidden(); result" ,
+            { scope , policy }
+        ) ;
+        expect( result ).toBe( "DENIED-SENTINEL" ) ;
+        expect( scope.result ).toBe( "DENIED-SENTINEL" ) ;
+        expect( denied ).toEqual( [ "forbidden" ] ) ;
+    } ) ;
+
+    test( "parse / evaluate / stringify converge on the same AST" , () =>
+    {
+        const source = "{a:1,b:[2,3]}" ;
+        const ast    = parseToAST( source ) ;
+        const value  = evalAST( ast ) ;
+        const back   = stringifyAST( ast ) ;
+
+        expect( back  ).toBe( source ) ;
+        expect( value ).toEqual( { a: 1 , b: [ 2 , 3 ] } ) ;
     } ) ;
 } ) ;

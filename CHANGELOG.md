@@ -48,6 +48,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the underlying `SyntaxError` preserved on the `cause` chain.
   `toJSON` always forces `jsonCompatible: true`, accepting (and
   silently neutralizing) any other `StringifyOptions` (#8).
-- `EdenReferenceError` and `EdenSecurityError` added to the
-  public error hierarchy in preparation for the evaluator
-  surface (#6).
+- Evaluator surface: full AST evaluation against a runtime
+  `scope` with a `SecurityPolicy` gating function calls and
+  constructors. Reads (`Identifier`, `MemberExpression`) walk
+  the scope and raise `EdenReferenceError` on missing paths or
+  descents through `null` / `undefined`; primitives are
+  auto-boxed so `"hello".length` resolves transparently.
+  Invocations (`CallExpression`, `NewExpression`) consult the
+  policy's `authorized` glob list (exact paths or one-or-more-
+  segment suffix wildcards such as `"Math.*"`), respect the
+  `allowFunctionCall` / `allowConstructor` flags, and on denial
+  fire the `onDenied` hook before returning the configured
+  `undefineable` value (default `undefined`).
+  `AssignmentStatement` walks the path on the scope, creating
+  missing intermediates as needed per SPEC §5.2; writing through
+  a primitive intermediate surfaces the native `TypeError`.
+  Composites (`ArrayExpression`, `ObjectExpression`,
+  `UnaryExpression`) walk their sub-nodes left-to-right;
+  `ObjectExpression` handles the three property shapes —
+  longhand, shorthand, and computed (key coerced through
+  `String(...)`). Multi-statement eval-mode programs yield the
+  value of the last non-assignment expression per SPEC §3.2.
+  `EdenReferenceError` and `EdenSecurityError` are re-exported
+  from the public façade; the `Evaluator`, `Scope`,
+  `SecurityPolicy` and internal `evalAST` helpers stay private
+  until the public `evaluate()` entry point lands (#6).
