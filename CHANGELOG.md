@@ -29,3 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `sortKeys`, `trailingCommas`, `jsonCompatible`, `replacer`,
   `maxDepth`; detects circular runtime structures and raises a clear
   `EdenTypeError` instead of overflowing the stack (#4).
+- Public API surface frozen and exercised by a dedicated smoke
+  test suite (`test/api.test.js`): every export is asserted by
+  shape, internal classes are confirmed hidden, and the two
+  canonical round trips (`parse → stringify`, `parseToAST →
+  stringifyAST`) are smoke-tested through the façade (#5).
