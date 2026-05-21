@@ -8,17 +8,15 @@
  * `SecurityPolicy` raises `EdenSecurityError`, and any unresolved
  * identifier or path raises `EdenReferenceError`.
  *
- * Coverage as of sub-step 6.3: `Literal` of every `kind`,
- * `Program` (data or eval) with a body of length ≤ 1,
- * `Identifier` and `MemberExpression` reads, plus
- * `CallExpression` and `NewExpression` gated by the active
- * `SecurityPolicy`. Reads always pass; invocations require both
- * the matching policy flag (`allowFunctionCall` /
- * `allowConstructor`) and a `authorized` glob match, otherwise
- * the policy's `onDenied` hook fires and the configured
- * `undefineable` value is returned. Every other node type raises
- * `EdenTypeError` with an explicit "not yet implemented" message
- * so callers fail loudly rather than silently dropping data.
+ * Coverage as of sub-step 6.6: every AST node type the parser can
+ * produce. Reads (`Identifier`, `MemberExpression`) always pass;
+ * invocations (`CallExpression`, `NewExpression`) are gated by the
+ * active `SecurityPolicy` — denial fires the `onDenied` hook and
+ * returns the configured `undefineable` value. Composite shapes
+ * (`ArrayExpression`, `ObjectExpression`, `UnaryExpression`) walk
+ * their sub-nodes left-to-right. `Program` in eval mode handles
+ * any number of statements and returns the value of the last
+ * non-assignment expression (SPEC §3.2).
  *
  * The class is exposed within the package but is **not** part of
  * the public API — consumers should import the (future) `evaluate()`
@@ -91,6 +89,19 @@ export default class Evaluator
         throw new EdenTypeError(
             "Cannot use " + type + " as a member-path segment."
         ) ;
+    }
+
+    /**
+     * Evaluates an `ArrayExpression` node by walking the elements
+     * left-to-right and returning a fresh JavaScript array of the
+     * resulting values.
+     *
+     * @param   {import("../parser/ast/createArrayExpression.js").ArrayExpression} node
+     * @returns {*[]}
+     */
+    #evaluateArrayExpression( node )
+    {
+        return node.elements.map( ( element ) => this.#evaluateNode( element ) ) ;
     }
 
     /**
@@ -225,9 +236,9 @@ export default class Evaluator
 
     /**
      * Dispatches AST evaluation on `node.type`. As of sub-step 6.3
-     * supported types are `Program`, `Literal`, `Identifier`,
-     * `MemberExpression`, `CallExpression`, `NewExpression` and
-     * `AssignmentStatement`; every other node type raises
+     * Every AST node type produced by the parser is supported as
+     * of sub-step 6.6; an unknown `type` (forged by hand) still
+     * triggers the defensive `default` branch and raises
      * `EdenTypeError`.
      *
      * @param   {{type: string}} node
@@ -279,6 +290,24 @@ export default class Evaluator
                     /** @type {import("../parser/ast/createAssignmentStatement.js").AssignmentStatement} */ ( node )
                 ) ;
             }
+            case NodeType.ARRAY_EXPRESSION :
+            {
+                return this.#evaluateArrayExpression(
+                    /** @type {import("../parser/ast/createArrayExpression.js").ArrayExpression} */ ( node )
+                ) ;
+            }
+            case NodeType.OBJECT_EXPRESSION :
+            {
+                return this.#evaluateObjectExpression(
+                    /** @type {import("../parser/ast/createObjectExpression.js").ObjectExpression} */ ( node )
+                ) ;
+            }
+            case NodeType.UNARY_EXPRESSION :
+            {
+                return this.#evaluateUnaryExpression(
+                    /** @type {import("../parser/ast/createUnaryExpression.js").UnaryExpression} */ ( node )
+                ) ;
+            }
             default :
             {
                 throw new EdenTypeError(
@@ -286,6 +315,49 @@ export default class Evaluator
                 ) ;
             }
         }
+    }
+
+    /**
+     * Evaluates an `ObjectExpression` node by walking each
+     * `Property` in source order and producing a fresh JavaScript
+     * object. Three property shapes are recognized:
+     *
+     *   - **longhand** (`key: value`) — `key` is an `Identifier`
+     *     (taking `.name`) or a `Literal` of kind `string` or
+     *     `number` (taking its value, coerced to a string for
+     *     numbers).
+     *   - **shorthand** (`{ foo }`, eval mode) — equivalent to
+     *     `{ foo: foo }`: the identifier is looked up on the scope
+     *     and reused as both key and value.
+     *   - **computed** (`{ [expr]: value }`, eval mode) — the key
+     *     expression is evaluated and coerced to a string, then
+     *     used as the property name.
+     *
+     * @param   {import("../parser/ast/createObjectExpression.js").ObjectExpression} node
+     * @returns {object}
+     */
+    #evaluateObjectExpression( node )
+    {
+        const result = {} ;
+
+        for ( const property of node.properties )
+        {
+            const { key , value , shorthand , computed } = property ;
+
+            if ( shorthand )
+            {
+                result[ key.name ] = this.#evaluateIdentifier( key ) ;
+                continue ;
+            }
+            if ( computed )
+            {
+                const evaluatedKey = this.#evaluateNode( key ) ;
+                result[ String( evaluatedKey ) ] = this.#evaluateNode( value ) ;
+                continue ;
+            }
+            result[ this.#propertyKeyToString( key ) ] = this.#evaluateNode( value ) ;
+        }
+        return result ;
     }
 
     /**
@@ -307,18 +379,75 @@ export default class Evaluator
         {
             return undefined ;
         }
+
+        if ( mode === ProgramMode.EVAL )
+        {
+            // SPEC §3.2: "The program result is the value of the
+            // last expression evaluated, or undefined if the
+            // program contains only assignments." Every statement
+            // runs for its side effects; only non-assignment
+            // statements contribute to the visible result.
+            let result = undefined ;
+            for ( const statement of body )
+            {
+                const value = this.#evaluateNode( statement ) ;
+                if ( statement.type !== NodeType.ASSIGNMENT_STATEMENT )
+                {
+                    result = value ;
+                }
+            }
+            return result ;
+        }
+
         if ( body.length > 1 )
         {
-            if ( mode === ProgramMode.EVAL )
-            {
-                throw new EdenTypeError(
-                    "Evaluation of multi-statement eval-mode programs is not yet implemented."
-                ) ;
-            }
             throw new EdenTypeError(
                 "Data-mode Program must contain exactly one value."
             ) ;
         }
         return this.#evaluateNode( body[ 0 ] ) ;
+    }
+
+    /**
+     * Evaluates a `UnaryExpression` node by evaluating its argument
+     * and applying the unary operator. Coercion follows JavaScript:
+     * `-` on a `BigInt` yields the negated BigInt, `+` on a `BigInt`
+     * raises the native `TypeError` (BigInts cannot be cast to
+     * Number this way) — both intentional, matching the host
+     * semantics expected from eden eval mode.
+     *
+     * @param   {import("../parser/ast/createUnaryExpression.js").UnaryExpression} node
+     * @returns {*}
+     */
+    #evaluateUnaryExpression( node )
+    {
+        const argument = this.#evaluateNode( node.argument ) ;
+        return node.operator === "-" ? -argument : +argument ;
+    }
+
+    /**
+     * Returns the runtime string a longhand `Property.key` resolves
+     * to. Mirrors the helper used by the serializer for sorting and
+     * keeps the two layers in sync without crossing a module
+     * boundary.
+     *
+     * @param   {{type: string, name?: string, value?: *, kind?: string}} keyNode
+     * @returns {string}
+     */
+    #propertyKeyToString( keyNode )
+    {
+        if ( keyNode.type === NodeType.IDENTIFIER )
+        {
+            return keyNode.name ;
+        }
+        if ( keyNode.type === NodeType.LITERAL )
+        {
+            return typeof keyNode.value === "string"
+                ? keyNode.value
+                : String( keyNode.value ) ;
+        }
+        throw new EdenTypeError(
+            "Cannot use AST node \"" + keyNode.type + "\" as a property key."
+        ) ;
     }
 }

@@ -84,34 +84,11 @@ describe( "evaluator — Program" , () =>
         expect( evalAST( program ) ).toBe( 42 ) ;
     } ) ;
 
-    test( "multi-statement eval-mode Program raises EdenTypeError (6.1 scope)" , () =>
-    {
-        const program = parseToAST( "1; 2" , { mode: ProgramMode.EVAL } ) ;
-        expect( () => evalAST( program ) ).toThrow( EdenTypeError ) ;
-    } ) ;
 } ) ;
 
-describe( "evaluator — not yet implemented" , () =>
+describe( "evaluator — unknown AST type" , () =>
 {
-    test( "ArrayExpression (data-mode source) raises EdenTypeError" , () =>
-    {
-        const program = parseToAST( "[1,2,3]" ) ;
-        expect( () => evalAST( program ) ).toThrow( EdenTypeError ) ;
-    } ) ;
-
-    test( "ObjectExpression (data-mode source) raises EdenTypeError" , () =>
-    {
-        const program = parseToAST( "{a:1}" ) ;
-        expect( () => evalAST( program ) ).toThrow( EdenTypeError ) ;
-    } ) ;
-
-    test( "UnaryExpression raises EdenTypeError" , () =>
-    {
-        const program = parseToAST( "-1" ) ;
-        expect( () => evalAST( program ) ).toThrow( EdenTypeError ) ;
-    } ) ;
-
-    test( "unknown AST node type raises EdenTypeError" , () =>
+    test( "forged unknown type raises EdenTypeError" , () =>
     {
         const forged = { type: "FakeNodeType" } ;
         expect( () => evalAST( forged ) ).toThrow( EdenTypeError ) ;
@@ -543,7 +520,9 @@ describe( "evaluator — AssignmentStatement" , () =>
     test( "identifier target on empty scope creates the key" , () =>
     {
         const scope = {} ;
-        const result = evalProgram( "a = 1" , { scope } ) ;
+        // Read-back trailing expression so the Program returns a
+        // value (SPEC §3.2: assignment-only Programs yield undefined).
+        const result = evalProgram( "a = 1; a" , { scope } ) ;
         expect( result ).toBe( 1 ) ;
         expect( scope.a ).toBe( 1 ) ;
     } ) ;
@@ -606,12 +585,19 @@ describe( "evaluator — AssignmentStatement" , () =>
         expect( scope.target ).toBe( 7 ) ;
     } ) ;
 
-    test( "assignment expression returns the assigned value" , () =>
+    test( "AssignmentStatement node evaluates to the assigned value" , () =>
     {
-        // The Program body is the AssignmentStatement; the program
-        // result should equal the assigned value.
-        const result = evalProgram( "x = 99" , { scope: {} } ) ;
-        expect( result ).toBe( 99 ) ;
+        // The Program-level rule (SPEC §3.2) hides the assignment
+        // value when it is the program's last statement, but the
+        // statement node itself still evaluates to the value. We
+        // forge an isolated node to assert that contract directly.
+        const node =
+        {
+            type   : NodeType.ASSIGNMENT_STATEMENT ,
+            target : { type: NodeType.IDENTIFIER , name: "x" } ,
+            value  : { type: NodeType.LITERAL , value: 99 , kind: LiteralKind.NUMBER }
+        } ;
+        expect( evalAST( node , { scope: {} } ) ).toBe( 99 ) ;
     } ) ;
 
     test( "writing through a primitive intermediate raises native TypeError" , () =>
@@ -644,5 +630,230 @@ describe( "evaluator — AssignmentStatement" , () =>
         const scope = { a: undefined } ;
         evalProgram( "a.b = 1" , { scope } ) ;
         expect( scope.a ).toEqual( { b: 1 } ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — ArrayExpression" , () =>
+{
+    test( "data-mode array of scalars" , () =>
+    {
+        expect( evalAST( parseToAST( "[1,2,3]" ) ) ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "empty array" , () =>
+    {
+        expect( evalAST( parseToAST( "[]" ) ) ).toEqual( [] ) ;
+    } ) ;
+
+    test( "nested arrays" , () =>
+    {
+        expect( evalAST( parseToAST( "[[1,2],[3]]" ) ) ).toEqual( [ [ 1 , 2 ] , [ 3 ] ] ) ;
+    } ) ;
+
+    test( "array with identifier references (eval mode)" , () =>
+    {
+        const scope = { a: 1 , b: 2 , c: 3 } ;
+        expect( evalProgram( "[a, b, c]" , { scope } ) ).toEqual( [ 1 , 2 , 3 ] ) ;
+    } ) ;
+
+    test( "array with call expression (eval mode + policy)" , () =>
+    {
+        const scope  = { Math } ;
+        const policy = { allowFunctionCall: true , authorized: [ "Math.*" ] } ;
+        expect( evalProgram( "[Math.sqrt(4), 5]" , { scope , policy } ) ).toEqual( [ 2 , 5 ] ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — ObjectExpression (longhand)" , () =>
+{
+    test( "data-mode flat object" , () =>
+    {
+        expect( evalAST( parseToAST( "{a:1,b:2}" ) ) ).toEqual( { a: 1 , b: 2 } ) ;
+    } ) ;
+
+    test( "empty object" , () =>
+    {
+        expect( evalAST( parseToAST( "{}" ) ) ).toEqual( {} ) ;
+    } ) ;
+
+    test( "numeric key becomes a string key on the runtime object" , () =>
+    {
+        expect( evalAST( parseToAST( "{0:\"x\",42:\"y\"}" ) ) ).toEqual( { "0": "x" , "42": "y" } ) ;
+    } ) ;
+
+    test( "string key with spaces" , () =>
+    {
+        expect( evalAST( parseToAST( "{\"key with space\":1}" ) ) ).toEqual( { "key with space": 1 } ) ;
+    } ) ;
+
+    test( "nested objects" , () =>
+    {
+        expect( evalAST( parseToAST( "{a:{b:1}}" ) ) ).toEqual( { a: { b: 1 } } ) ;
+    } ) ;
+
+    test( "duplicate keys — last definition wins (forged AST)" , () =>
+    {
+        // The parser rejects duplicate keys in strict mode, so we
+        // build the AST directly to exercise the evaluator's
+        // overwrite path.
+        const node =
+        {
+            type       : NodeType.OBJECT_EXPRESSION ,
+            properties :
+            [
+                {
+                    type      : "Property" ,
+                    key       : { type: NodeType.IDENTIFIER , name: "a" } ,
+                    value     : { type: NodeType.LITERAL , value: 1 , kind: LiteralKind.NUMBER } ,
+                    shorthand : false ,
+                    computed  : false
+                } ,
+                {
+                    type      : "Property" ,
+                    key       : { type: NodeType.IDENTIFIER , name: "a" } ,
+                    value     : { type: NodeType.LITERAL , value: 2 , kind: LiteralKind.NUMBER } ,
+                    shorthand : false ,
+                    computed  : false
+                }
+            ]
+        } ;
+        expect( evalAST( node ) ).toEqual( { a: 2 } ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — ObjectExpression (shorthand)" , () =>
+{
+    test( "shorthand reads from the scope" , () =>
+    {
+        expect( evalProgram( "{foo}" , { scope: { foo: 42 } } ) ).toEqual( { foo: 42 } ) ;
+    } ) ;
+
+    test( "shorthand mixed with longhand" , () =>
+    {
+        const scope = { a: 1 , c: 3 } ;
+        expect( evalProgram( "{a, b: 2, c}" , { scope } ) ).toEqual( { a: 1 , b: 2 , c: 3 } ) ;
+    } ) ;
+
+    test( "shorthand on missing identifier throws EdenReferenceError" , () =>
+    {
+        expect( () => evalProgram( "{missing}" , { scope: {} } ) ).toThrow( EdenReferenceError ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — ObjectExpression (computed key)" , () =>
+{
+    test( "computed key from a scope identifier" , () =>
+    {
+        const scope = { dyn: "hello" } ;
+        expect( evalProgram( "{[dyn]: 1}" , { scope } ) ).toEqual( { hello: 1 } ) ;
+    } ) ;
+
+    test( "computed key from a member expression" , () =>
+    {
+        const scope = { obj: { k: "the-key" } } ;
+        expect( evalProgram( "{[obj.k]: 7}" , { scope } ) ).toEqual( { "the-key": 7 } ) ;
+    } ) ;
+
+    test( "computed key with call expression" , () =>
+    {
+        const scope  = { Math } ;
+        const policy = { allowFunctionCall: true , authorized: [ "Math.*" ] } ;
+        expect( evalProgram( "{[Math.floor(2.7)]: \"x\"}" , { scope , policy } ) ).toEqual( { "2": "x" } ) ;
+    } ) ;
+
+    test( "computed key coerced through String() — BigInt example" , () =>
+    {
+        const scope = { id: 1n } ;
+        expect( evalProgram( "{[id]: \"v\"}" , { scope } ) ).toEqual( { "1": "v" } ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — UnaryExpression" , () =>
+{
+    test.each(
+    [
+        [ "-1"        , -1                          ] ,
+        [ "+1"        , 1                           ] ,
+        [ "-1.5"      , -1.5                        ] ,
+        [ "-Infinity" , Number.NEGATIVE_INFINITY    ] ,
+        [ "+Infinity" , Number.POSITIVE_INFINITY    ] ,
+        [ "-1n"       , -1n                         ] ,
+        [ "-0xFF"     , -255                        ]
+    ] )( "evalAST(parseToAST(%p)) returns %p" , ( source , expected ) =>
+    {
+        expect( evalAST( parseToAST( source ) ) ).toEqual( expected ) ;
+    } ) ;
+
+    test( "-NaN remains NaN (since -NaN === NaN)" , () =>
+    {
+        expect( Number.isNaN( evalAST( parseToAST( "-NaN" ) ) ) ).toBe( true ) ;
+    } ) ;
+
+    test( "+1n throws native TypeError (BigInt cannot cast to Number via +)" , () =>
+    {
+        expect( () => evalAST( parseToAST( "+1n" ) ) ).toThrow( TypeError ) ;
+    } ) ;
+
+    test( "-(identifier) in eval mode" , () =>
+    {
+        expect( evalProgram( "-foo" , { scope: { foo: 5 } } ) ).toBe( -5 ) ;
+    } ) ;
+} ) ;
+
+describe( "evaluator — Program eval multi-statement" , () =>
+{
+    test( "two assignments then read returns the read value" , () =>
+    {
+        const scope  = {} ;
+        const result = evalProgram( "a = 1; b = 2; b" , { scope } ) ;
+        expect( result ).toBe( 2 ) ;
+        expect( scope ).toEqual( { a: 1 , b: 2 } ) ;
+    } ) ;
+
+    test( "only assignments → result is undefined (SPEC §3.2)" , () =>
+    {
+        const scope  = {} ;
+        const result = evalProgram( "a = 1; b = 2" , { scope } ) ;
+        expect( result ).toBeUndefined() ;
+        expect( scope ).toEqual( { a: 1 , b: 2 } ) ;
+    } ) ;
+
+    test( "expression after assignment uses the freshly assigned value" , () =>
+    {
+        const scope  = {} ;
+        const result = evalProgram( "user = {name:\"Marc\"}; user.name" , { scope } ) ;
+        expect( result ).toBe( "Marc" ) ;
+    } ) ;
+
+    test( "expression before final assignment is overwritten in result" , () =>
+    {
+        // Last visible expression is `b` (the assignment `c = 99`
+        // doesn't update the result), so result === 2.
+        const result = evalProgram( "a = 1; b; c = 99" , { scope: { b: 2 } } ) ;
+        expect( result ).toBe( 2 ) ;
+    } ) ;
+
+    test( "single expression — no assignment — returns its value" , () =>
+    {
+        expect( evalProgram( "42" , { scope: {} } ) ).toBe( 42 ) ;
+    } ) ;
+
+    test( "construction + member read" , () =>
+    {
+        // The policy is path-based on the static AST path: `d` is
+        // a local variable, so the user must whitelist `"d.*"` to
+        // call methods on it. This is the documented tradeoff of
+        // a static-path policy.
+        const policy =
+        {
+            allowFunctionCall : true ,
+            allowConstructor  : true ,
+            authorized        : [ "Date" , "d.*" ]
+        } ;
+        const result = evalProgram(
+            "d = new Date(\"2024-01-15\"); d.getFullYear()" ,
+            { scope: { Date } , policy }
+        ) ;
+        expect( result ).toBe( 2024 ) ;
     } ) ;
 } ) ;
