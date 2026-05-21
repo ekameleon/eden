@@ -30,6 +30,8 @@ export { default as stringifyAST } from "./serializer/stringifyAST.js" ;
 export { default as fromJSON     } from "./convert/fromJSON.js" ;
 export { default as toJSON       } from "./convert/toJSON.js" ;
 
+export { default as evaluate     } from "./evaluator/evaluate.js" ;
+
 /**
  * Library version, kept in sync with `package.json`.
  * @type {string}

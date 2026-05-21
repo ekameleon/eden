@@ -73,3 +73,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the public façade; the `Evaluator`, `Scope`,
   `SecurityPolicy` and internal `evalAST` helpers stay private
   until the public `evaluate()` entry point lands (#6).
+- Public `evaluate(source, options?)` entry point. The function
+  parses `source` in eval mode (any caller-supplied `mode` is
+  silently overridden) and walks the AST against the runtime
+  `scope` and `policy` carried by `options`. `ParseOptions` and
+  `EvaluateOptions` share the same options bag and are forwarded
+  to their respective consumers (#7).
