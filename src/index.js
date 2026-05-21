@@ -22,6 +22,9 @@ export { default as ProgramMode } from "./parser/ast/ProgramMode.js" ;
 export { default as parse       } from "./parser/parse.js" ;
 export { default as parseToAST  } from "./parser/parseToAST.js" ;
 
+export { default as stringify    } from "./serializer/stringify.js" ;
+export { default as stringifyAST } from "./serializer/stringifyAST.js" ;
+
 /**
  * Library version, kept in sync with `package.json`.
  * @type {string}

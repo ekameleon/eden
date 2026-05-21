@@ -391,7 +391,8 @@ are ignored (forward compatibility).
     unquotedKeys:    true,        // eden default; false for JSON-compat
     sortKeys:        false,
     jsonCompatible:  false,       // forces strict JSON output
-    replacer:        null         // (key, value) => replacement, JSON-like
+    replacer:        null,        // (key, value) => replacement, JSON-like
+    maxDepth:        1024         // safety guard against stack overflow
 }
 ```
 

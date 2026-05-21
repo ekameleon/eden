@@ -26,8 +26,9 @@ import { fileURLToPath } from "node:url" ;
 
 import * as eden from "../src/index.js" ;
 
-const HERE         = dirname( fileURLToPath( import.meta.url ) ) ;
-const FIXTURES_DIR = join( HERE, "fixtures", "parse" ) ;
+const HERE                   = dirname( fileURLToPath( import.meta.url ) ) ;
+const FIXTURES_DIR           = join( HERE, "fixtures", "parse" ) ;
+const STRINGIFY_FIXTURES_DIR = join( HERE, "fixtures", "stringify" ) ;
 
 /**
  * Discovers fixture pairs in the parse fixtures directory.
@@ -101,6 +102,94 @@ describe( "conformance: parse fixtures", () =>
             const actual   = eden.parse( source ) ;
 
             expect( actual ).toEqual( expected ) ;
+        } ) ;
+    }
+} ) ;
+
+/**
+ * Discovers stringify fixture pairs: each `NNN-name.eden` source has
+ * a matching `NNN-name.expected` text file containing the canonical
+ * stringified output, and may optionally have a
+ * `NNN-name.options.json` companion carrying the `StringifyOptions`
+ * to pass.
+ *
+ * @returns {Array<{ name: string, edenPath: string, expectedPath: string, optionsPath: string, expectedExists: boolean, optionsExists: boolean }>}
+ */
+function discoverStringifyFixtures()
+{
+    if ( ! existsSync( STRINGIFY_FIXTURES_DIR ) )
+    {
+        return [] ;
+    }
+
+    const entries = readdirSync( STRINGIFY_FIXTURES_DIR )
+        .filter( ( file ) => file.endsWith( ".eden" ) )
+        .sort() ;
+
+    return entries.map( ( file ) =>
+    {
+        const name         = file.slice( 0, -".eden".length ) ;
+        const edenPath     = join( STRINGIFY_FIXTURES_DIR, file ) ;
+        const expectedPath = join( STRINGIFY_FIXTURES_DIR, name + ".expected" ) ;
+        const optionsPath  = join( STRINGIFY_FIXTURES_DIR, name + ".options.json" ) ;
+        return {
+            name,
+            edenPath,
+            expectedPath,
+            optionsPath,
+            expectedExists: existsSync( expectedPath ) ,
+            optionsExists : existsSync( optionsPath )
+        } ;
+    } ) ;
+}
+
+const stringifyFixtures = discoverStringifyFixtures() ;
+const hasStringify      = typeof eden.stringifyAST === "function" && typeof eden.parseToAST === "function" ;
+
+describe( "conformance: stringify fixtures", () =>
+{
+    if ( ! hasStringify )
+    {
+        test( `${ stringifyFixtures.length } fixture(s) discovered, 0 executed (stringifyAST() or parseToAST() not yet implemented)`, () =>
+        {
+            console.log(
+                `[conformance] stringify path is not ready — skipping ${ stringifyFixtures.length } fixture(s).`
+            ) ;
+            expect( hasStringify ).toBe( false ) ;
+        } ) ;
+        return ;
+    }
+
+    if ( stringifyFixtures.length === 0 )
+    {
+        test( "no fixtures found", () =>
+        {
+            console.log( `[conformance] no fixtures found in ${ STRINGIFY_FIXTURES_DIR }` ) ;
+        } ) ;
+        return ;
+    }
+
+    for ( const fixture of stringifyFixtures )
+    {
+        test( fixture.name, () =>
+        {
+            if ( ! fixture.expectedExists )
+            {
+                throw new Error(
+                    `Fixture "${ fixture.name }" is missing its .expected companion at ${ fixture.expectedPath }`
+                ) ;
+            }
+
+            const source   = readFileSync( fixture.edenPath     , "utf8" ) ;
+            const expected = readFileSync( fixture.expectedPath , "utf8" ) ;
+            const options  = fixture.optionsExists
+                             ? JSON.parse( readFileSync( fixture.optionsPath , "utf8" ) )
+                             : undefined ;
+
+            const ast    = eden.parseToAST( source ) ;
+            const actual = eden.stringifyAST( ast , options ) ;
+
+            expect( actual ).toBe( expected ) ;
         } ) ;
     }
 } ) ;

@@ -72,6 +72,8 @@ export default class Serializer
     {
         this.#options    = resolveStringifyOptions( options ) ;
         this.#indentUnit = computeIndentUnit( this.#options.indent ) ;
+        this.#depth      = 0 ;
+        this.#stack      = new WeakSet() ;
     }
 
     /**
@@ -80,7 +82,11 @@ export default class Serializer
      * The dispatch is keyed on the shape of `input`: anything that
      * looks like an AST node (plain object with a string `type`) is
      * routed through the node path, everything else through the value
-     * path.
+     * path. The `replacer` option, when set, is applied **only** to
+     * the value path and follows the `JSON.stringify` convention: the
+     * function is first invoked with `key === ""` against a synthetic
+     * wrapper `{ "": input }`, allowing the root value itself to be
+     * transformed or dropped.
      *
      * @param   {*} input
      * @returns {string}
@@ -92,11 +98,104 @@ export default class Serializer
         {
             return this.#serializeNode( input , "" ) ;
         }
+
+        const { replacer } = this.#options ;
+
+        if ( typeof replacer === "function" )
+        {
+            const wrapper  = { "": input } ;
+            const resolved = replacer.call( wrapper , "" , input ) ;
+            if ( resolved === undefined )
+            {
+                return "" ;
+            }
+            return this.#serializeValue( resolved , "" ) ;
+        }
         return this.#serializeValue( input , "" ) ;
     }
 
+    #depth ;
     #indentUnit ;
     #options ;
+    #stack ;
+
+    /**
+     * Invokes the `replacer` option for a single (key, value) pair,
+     * with the JSON-compatible `this` binding (the parent holder).
+     * Returns the original value when no replacer is configured, so
+     * call sites can use the result unconditionally.
+     *
+     * @param   {object | *[]} holder
+     * @param   {string}       key
+     * @param   {*}            value
+     * @returns {*}
+     */
+    #applyReplacer( holder , key , value )
+    {
+        const { replacer } = this.#options ;
+        if ( typeof replacer !== "function" )
+        {
+            return value ;
+        }
+        return replacer.call( holder , key , value ) ;
+    }
+
+    /**
+     * Increments the internal depth counter, checking it against
+     * `options.maxDepth` first. Used for AST composites and as the
+     * shared depth tracker behind `#enterValueComposite`.
+     *
+     * @returns {void}
+     */
+    #enterDepth()
+    {
+        if ( this.#depth >= this.#options.maxDepth )
+        {
+            throw new EdenTypeError( "Maximum stringify depth exceeded." ) ;
+        }
+        this.#depth += 1 ;
+    }
+
+    /**
+     * Enters a runtime value composite (array or plain object):
+     * checks the cycle stack, increments depth, and pushes the
+     * composite onto the stack so siblings remain valid but
+     * ancestors are detected as cycles.
+     *
+     * @param   {object | *[]} value
+     * @returns {void}
+     */
+    #enterValueComposite( value )
+    {
+        if ( this.#stack.has( value ) )
+        {
+            throw new EdenTypeError( "Converting circular structure to eden." ) ;
+        }
+        this.#enterDepth() ;
+        this.#stack.add( value ) ;
+    }
+
+    /**
+     * Reverses `#enterDepth()`.
+     *
+     * @returns {void}
+     */
+    #exitDepth()
+    {
+        this.#depth -= 1 ;
+    }
+
+    /**
+     * Reverses `#enterValueComposite()`.
+     *
+     * @param   {object | *[]} value
+     * @returns {void}
+     */
+    #exitValueComposite( value )
+    {
+        this.#stack.delete( value ) ;
+        this.#exitDepth() ;
+    }
 
     /**
      * Renders the parenthesized argument list shared by `CallExpression`
@@ -141,12 +240,12 @@ export default class Serializer
         }
         if ( this.#indentUnit === "" )
         {
-            const parts = items.map( ( item ) => renderItem( item , prefix ) ) ;
+            const parts = items.map( ( item , index ) => renderItem( item , prefix , index ) ) ;
             return "[" + parts.join( "," ) + "]" ;
         }
 
         const childPrefix = prefix + this.#indentUnit ;
-        const parts       = items.map( ( item ) => renderItem( item , childPrefix ) ) ;
+        const parts       = items.map( ( item , index ) => renderItem( item , childPrefix , index ) ) ;
         const trailing    = this.#options.trailingCommas && ! this.#options.jsonCompatible
                             ? ","
                             : "" ;
@@ -240,11 +339,19 @@ export default class Serializer
      */
     #serializeArrayExpression( node , prefix )
     {
-        return this.#renderArray(
-            node.elements ,
-            prefix ,
-            ( child , childPrefix ) => this.#serializeNode( child , childPrefix )
-        ) ;
+        this.#enterDepth() ;
+        try
+        {
+            return this.#renderArray(
+                node.elements ,
+                prefix ,
+                ( child , childPrefix ) => this.#serializeNode( child , childPrefix )
+            ) ;
+        }
+        finally
+        {
+            this.#exitDepth() ;
+        }
     }
 
     /**
@@ -259,11 +366,33 @@ export default class Serializer
      */
     #serializeArrayValue( array , prefix )
     {
-        return this.#renderArray(
-            array ,
-            prefix ,
-            ( child , childPrefix ) => this.#serializeValue( child , childPrefix )
-        ) ;
+        this.#enterValueComposite( array ) ;
+        try
+        {
+            const hasReplacer = typeof this.#options.replacer === "function" ;
+
+            return this.#renderArray(
+                array ,
+                prefix ,
+                ( child , childPrefix , index ) =>
+                {
+                    let value = child ;
+                    if ( hasReplacer )
+                    {
+                        value = this.#applyReplacer( array , String( index ) , child ) ;
+                        if ( value === undefined )
+                        {
+                            return "null" ;
+                        }
+                    }
+                    return this.#serializeValue( value , childPrefix ) ;
+                }
+            ) ;
+        }
+        finally
+        {
+            this.#exitValueComposite( array ) ;
+        }
     }
 
     /**
@@ -599,64 +728,72 @@ export default class Serializer
      */
     #serializeObjectExpression( node , prefix )
     {
-        let properties = node.properties ;
-
-        if ( this.#options.jsonCompatible )
+        this.#enterDepth() ;
+        try
         {
-            properties = properties.filter( ( p ) =>
-                ! ( p.value
-                 && p.value.type === NodeType.LITERAL
-                 && p.value.kind === LiteralKind.UNDEFINED ) ) ;
-        }
+            let properties = node.properties ;
 
-        if ( this.#options.sortKeys )
-        {
-            properties = [ ...properties ].sort( ( a , b ) =>
+            if ( this.#options.jsonCompatible )
             {
-                const ka = propertyKeyString( a ) ;
-                const kb = propertyKeyString( b ) ;
-                if ( ka < kb ) { return -1 ; }
-                if ( ka > kb ) { return  1 ; }
-                return 0 ;
-            } ) ;
-        }
+                properties = properties.filter( ( p ) =>
+                    ! ( p.value
+                     && p.value.type === NodeType.LITERAL
+                     && p.value.kind === LiteralKind.UNDEFINED ) ) ;
+            }
 
-        const separator = this.#indentUnit === "" ? ":" : ": " ;
-
-        return this.#renderObject(
-            properties ,
-            prefix ,
-            ( property , childPrefix ) =>
+            if ( this.#options.sortKeys )
             {
-                const { computed , shorthand , key , value } = property ;
+                properties = [ ...properties ].sort( ( a , b ) =>
+                {
+                    const ka = propertyKeyString( a ) ;
+                    const kb = propertyKeyString( b ) ;
+                    if ( ka < kb ) { return -1 ; }
+                    if ( ka > kb ) { return  1 ; }
+                    return 0 ;
+                } ) ;
+            }
 
-                if ( shorthand )
+            const separator = this.#indentUnit === "" ? ":" : ": " ;
+
+            return this.#renderObject(
+                properties ,
+                prefix ,
+                ( property , childPrefix ) =>
                 {
-                    if ( this.#options.jsonCompatible )
+                    const { computed , shorthand , key , value } = property ;
+
+                    if ( shorthand )
                     {
-                        throw new EdenTypeError(
-                            "Shorthand properties require eden, not strict JSON."
-                        ) ;
+                        if ( this.#options.jsonCompatible )
+                        {
+                            throw new EdenTypeError(
+                                "Shorthand properties require eden, not strict JSON."
+                            ) ;
+                        }
+                        return key.name ;
                     }
-                    return key.name ;
-                }
-                if ( computed )
-                {
-                    if ( this.#options.jsonCompatible )
+                    if ( computed )
                     {
-                        throw new EdenTypeError(
-                            "Computed property keys require eden, not strict JSON."
-                        ) ;
+                        if ( this.#options.jsonCompatible )
+                        {
+                            throw new EdenTypeError(
+                                "Computed property keys require eden, not strict JSON."
+                            ) ;
+                        }
+                        return "[" + this.#serializeNode( key , childPrefix ) + "]"
+                             + separator
+                             + this.#serializeNode( value , childPrefix ) ;
                     }
-                    return "[" + this.#serializeNode( key , childPrefix ) + "]"
+                    return this.#serializePropertyKey( key )
                          + separator
                          + this.#serializeNode( value , childPrefix ) ;
                 }
-                return this.#serializePropertyKey( key )
-                     + separator
-                     + this.#serializeNode( value , childPrefix ) ;
-            }
-        ) ;
+            ) ;
+        }
+        finally
+        {
+            this.#exitDepth() ;
+        }
     }
 
     /**
@@ -674,27 +811,46 @@ export default class Serializer
      */
     #serializeObjectValue( obj , prefix )
     {
-        let keys = Object.keys( obj ) ;
-
-        if ( this.#options.jsonCompatible )
+        this.#enterValueComposite( obj ) ;
+        try
         {
-            keys = keys.filter( ( k ) => obj[ k ] !== undefined ) ;
+            const hasReplacer = typeof this.#options.replacer === "function" ;
+
+            let keys = Object.keys( obj ) ;
+
+            if ( this.#options.jsonCompatible )
+            {
+                keys = keys.filter( ( k ) => obj[ k ] !== undefined ) ;
+            }
+            if ( this.#options.sortKeys )
+            {
+                keys = [ ...keys ].sort() ;
+            }
+
+            let entries = keys.map( ( key ) =>
+            {
+                const raw     = obj[ key ] ;
+                const value   = hasReplacer ? this.#applyReplacer( obj , key , raw ) : raw ;
+                const dropped = hasReplacer && value === undefined ;
+                return { key , value , dropped } ;
+            } ) ;
+            entries = entries.filter( ( e ) => ! e.dropped ) ;
+
+            const separator = this.#indentUnit === "" ? ":" : ": " ;
+
+            return this.#renderObject(
+                entries ,
+                prefix ,
+                ( entry , childPrefix ) =>
+                    this.#renderKey( entry.key )
+                  + separator
+                  + this.#serializeValue( entry.value , childPrefix )
+            ) ;
         }
-        if ( this.#options.sortKeys )
+        finally
         {
-            keys = [ ...keys ].sort() ;
+            this.#exitValueComposite( obj ) ;
         }
-
-        const separator = this.#indentUnit === "" ? ":" : ": " ;
-
-        return this.#renderObject(
-            keys ,
-            prefix ,
-            ( key , childPrefix ) =>
-                this.#renderKey( key )
-              + separator
-              + this.#serializeValue( obj[ key ] , childPrefix )
-        ) ;
     }
 
     /**

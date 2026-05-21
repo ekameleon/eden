@@ -20,12 +20,11 @@ import {
     EdenTypeError ,
     NodeType ,
     LiteralKind ,
-    ProgramMode
+    ProgramMode ,
+    stringify ,
+    stringifyAST
 }
 from "../src/index.js" ;
-
-import stringify    from "../src/serializer/stringify.js" ;
-import stringifyAST from "../src/serializer/stringifyAST.js" ;
 
 describe( "stringify — primitives" , () =>
 {
@@ -1054,5 +1053,146 @@ describe( "stringifyAST — Property shorthand and computed" , () =>
     test( "computed key with member expression" , () =>
     {
         expect( stringifyAST( evalAST( "{[obj.key]:1}" ) ) ).toBe( "{[obj.key]:1}" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — replacer (value path)" , () =>
+{
+    test( "top-level replacer transforms the root value" , () =>
+    {
+        const result = stringify( 5 , { replacer : ( key , value ) => key === "" ? value * 10 : value } ) ;
+        expect( result ).toBe( "50" ) ;
+    } ) ;
+
+    test( "top-level replacer returning undefined yields the empty string" , () =>
+    {
+        expect( stringify( { a: 1 } , { replacer : () => undefined } ) ).toBe( "" ) ;
+    } ) ;
+
+    test( "object replacer dropping a key omits that entry" , () =>
+    {
+        const result = stringify(
+            { keep: 1 , secret: 2 , also: 3 } ,
+            { replacer : ( k , v ) => k === "secret" ? undefined : v }
+        ) ;
+        expect( result ).toBe( "{keep:1,also:3}" ) ;
+    } ) ;
+
+    test( "array replacer dropping an index turns it into null" , () =>
+    {
+        const result = stringify(
+            [ 1 , 2 , 3 ] ,
+            { replacer : ( k , v ) => k === "1" ? undefined : v }
+        ) ;
+        expect( result ).toBe( "[1,null,3]" ) ;
+    } ) ;
+
+    test( "replacer transform on numeric values" , () =>
+    {
+        const result = stringify(
+            { a: 1 , b: 2 } ,
+            { replacer : ( k , v ) => typeof v === "number" ? v + 100 : v }
+        ) ;
+        expect( result ).toBe( "{a:101,b:102}" ) ;
+    } ) ;
+
+    test( "replacer non-function (string) is ignored" , () =>
+    {
+        // JSON.stringify also tolerates a non-function replacer (it
+        // expects either a function or an array of keys); here we
+        // accept and ignore non-callable replacers gracefully.
+        expect( stringify( { a: 1 } , { replacer: "not a function" } ) ).toBe( "{a:1}" ) ;
+    } ) ;
+
+    test( "replacer with jsonCompatible: drops still apply, output is JSON-valid" , () =>
+    {
+        const encoded = stringify(
+            { keep: 1 , drop: 2 , nan: Number.NaN } ,
+            {
+                jsonCompatible : true ,
+                replacer       : ( k , v ) => k === "drop" ? undefined : v
+            }
+        ) ;
+        expect( encoded ).toBe( "{\"keep\":1,\"nan\":null}" ) ;
+        expect( JSON.parse( encoded ) ).toEqual( { keep: 1 , nan: null } ) ;
+    } ) ;
+
+    test( "replacer is ignored on the AST path (stringifyAST)" , () =>
+    {
+        const program = parseToAST( "{a:1}" ) ;
+        // Even with a destructive replacer, stringifyAST emits the
+        // AST verbatim — replacer is a value-side concept.
+        const result  = stringifyAST( program , { replacer: () => undefined } ) ;
+        expect( result ).toBe( "{a:1}" ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — maxDepth" , () =>
+{
+    test( "depth at the limit succeeds" , () =>
+    {
+        // {a:{b:1}} is depth 2 (outer object, inner object).
+        expect( stringify( { a: { b: 1 } } , { maxDepth: 2 } ) ).toBe( "{a:{b:1}}" ) ;
+    } ) ;
+
+    test( "depth over the limit throws EdenTypeError" , () =>
+    {
+        expect( () => stringify( { a: { b: { c: 1 } } } , { maxDepth: 2 } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "Infinity disables the guard" , () =>
+    {
+        const deep = { a: { b: { c: { d: { e: 1 } } } } } ;
+        expect( stringify( deep , { maxDepth: Infinity } ) ).toBe( "{a:{b:{c:{d:{e:1}}}}}" ) ;
+    } ) ;
+
+    test( "AST path also honors maxDepth" , () =>
+    {
+        const program = parseToAST( "{a:{b:{c:1}}}" ) ;
+        expect( () => stringifyAST( program , { maxDepth: 2 } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "array depth contributes to the count" , () =>
+    {
+        expect( () => stringify( [ [ [ 1 ] ] ] , { maxDepth: 2 } ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+} ) ;
+
+describe( "stringify — cycle detection" , () =>
+{
+    test( "self-referential array throws EdenTypeError" , () =>
+    {
+        const a = [ 1 , 2 ] ;
+        a.push( a ) ;
+        expect( () => stringify( a ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "self-referential object throws EdenTypeError" , () =>
+    {
+        const o = { name: "root" } ;
+        o.self = o ;
+        expect( () => stringify( o ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "mutual cycle (a → b → a) throws EdenTypeError" , () =>
+    {
+        const a = {} ;
+        const b = {} ;
+        a.b = b ;
+        b.a = a ;
+        expect( () => stringify( a ) ).toThrow( EdenTypeError ) ;
+    } ) ;
+
+    test( "a shared sub-object reused as siblings is NOT a cycle" , () =>
+    {
+        const shared = { x: 1 } ;
+        const root   = { a: shared , b: shared } ;
+        expect( stringify( root ) ).toBe( "{a:{x:1},b:{x:1}}" ) ;
+    } ) ;
+
+    test( "sibling sharing also works inside arrays" , () =>
+    {
+        const shared = [ 1 , 2 ] ;
+        expect( stringify( [ shared , shared ] ) ).toBe( "[[1,2],[1,2]]" ) ;
     } ) ;
 } ) ;

@@ -30,6 +30,10 @@
  *           `BigInt`, no comments, no trailing commas.
  * @property {((key: string, value: *) => *) | null} [replacer=null]
  *           Optional `JSON.stringify`-style replacer function.
+ * @property {number} [maxDepth=1024]
+ *           Maximum nesting depth for composite values. Once
+ *           exceeded, the serializer raises `EdenTypeError`
+ *           rather than letting the call stack overflow.
  */
 
 const DEFAULTS = Object.freeze(
@@ -40,7 +44,8 @@ const DEFAULTS = Object.freeze(
     unquotedKeys   : true      ,
     sortKeys       : false     ,
     jsonCompatible : false     ,
-    replacer       : null
+    replacer       : null      ,
+    maxDepth       : 1024
 } ) ;
 
 /**

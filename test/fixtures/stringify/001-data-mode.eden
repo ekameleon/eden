@@ -1,0 +1,6 @@
+{
+    name: "Marc",
+    active: true,
+    tags: ["dev", "maker"],
+    count: 42
+}
