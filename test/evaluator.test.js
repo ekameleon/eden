@@ -537,3 +537,112 @@ describe( "evaluator — combined call / new" , () =>
         expect( log ).toEqual( [ "inner" ] ) ;
     } ) ;
 } ) ;
+
+describe( "evaluator — AssignmentStatement" , () =>
+{
+    test( "identifier target on empty scope creates the key" , () =>
+    {
+        const scope = {} ;
+        const result = evalProgram( "a = 1" , { scope } ) ;
+        expect( result ).toBe( 1 ) ;
+        expect( scope.a ).toBe( 1 ) ;
+    } ) ;
+
+    test( "member target creates the parent object on the fly" , () =>
+    {
+        const scope = {} ;
+        evalProgram( "obj.x = \"hi\"" , { scope } ) ;
+        expect( scope.obj ).toEqual( { x: "hi" } ) ;
+    } ) ;
+
+    test( "deep member target builds the whole intermediate chain" , () =>
+    {
+        const scope = {} ;
+        evalProgram( "a.b.c.d = 42" , { scope } ) ;
+        expect( scope.a.b.c.d ).toBe( 42 ) ;
+    } ) ;
+
+    test( "preserves existing siblings on intermediates" , () =>
+    {
+        const scope = { a: { other: "kept" } } ;
+        evalProgram( "a.b = 1" , { scope } ) ;
+        expect( scope.a ).toEqual( { other: "kept" , b: 1 } ) ;
+    } ) ;
+
+    test( "computed key with spaces" , () =>
+    {
+        const scope = { obj: {} } ;
+        evalProgram( "obj[\"key with space\"] = 7" , { scope } ) ;
+        expect( scope.obj ).toEqual( { "key with space": 7 } ) ;
+    } ) ;
+
+    test( "numeric computed key — created on plain object (not array)" , () =>
+    {
+        const scope = {} ;
+        evalProgram( "arr[0] = \"first\"" , { scope } ) ;
+        expect( Array.isArray( scope.arr ) ).toBe( false ) ;
+        expect( scope.arr ).toEqual( { "0": "first" } ) ;
+    } ) ;
+
+    test( "overwrite — second assignment replaces the first" , () =>
+    {
+        const scope = { a: 1 } ;
+        evalProgram( "a = 2" , { scope } ) ;
+        expect( scope.a ).toBe( 2 ) ;
+    } ) ;
+
+    test( "RHS is an evaluated expression — Math.sqrt result" , () =>
+    {
+        const scope  = { Math } ;
+        const policy = { allowFunctionCall: true , authorized: [ "Math.*" ] } ;
+        evalProgram( "r = Math.sqrt(9)" , { scope , policy } ) ;
+        expect( scope.r ).toBe( 3 ) ;
+    } ) ;
+
+    test( "RHS is an identifier from the same scope" , () =>
+    {
+        const scope = { source: 7 } ;
+        evalProgram( "target = source" , { scope } ) ;
+        expect( scope.target ).toBe( 7 ) ;
+    } ) ;
+
+    test( "assignment expression returns the assigned value" , () =>
+    {
+        // The Program body is the AssignmentStatement; the program
+        // result should equal the assigned value.
+        const result = evalProgram( "x = 99" , { scope: {} } ) ;
+        expect( result ).toBe( 99 ) ;
+    } ) ;
+
+    test( "writing through a primitive intermediate raises native TypeError" , () =>
+    {
+        // scope.s is a primitive string — writing to s.x is invalid
+        // in strict mode and surfaces as the standard TypeError.
+        const scope = { s: "hello" } ;
+        expect( () => evalProgram( "s.x = 1" , { scope } ) ).toThrow( TypeError ) ;
+    } ) ;
+
+    test( "mutation through an existing object intermediate" , () =>
+    {
+        const target = { keep: 1 } ;
+        const scope  = { obj: target } ;
+        evalProgram( "obj.added = 2" , { scope } ) ;
+        expect( target ).toBe( scope.obj ) ;        // same instance, mutated in place
+        expect( target.added ).toBe( 2 ) ;
+        expect( target.keep ).toBe( 1 ) ;
+    } ) ;
+
+    test( "intermediate held in `null` is replaced by an empty object" , () =>
+    {
+        const scope = { a: null } ;
+        evalProgram( "a.b = 1" , { scope } ) ;
+        expect( scope.a ).toEqual( { b: 1 } ) ;
+    } ) ;
+
+    test( "intermediate held in `undefined` is replaced by an empty object" , () =>
+    {
+        const scope = { a: undefined } ;
+        evalProgram( "a.b = 1" , { scope } ) ;
+        expect( scope.a ).toEqual( { b: 1 } ) ;
+    } ) ;
+} ) ;

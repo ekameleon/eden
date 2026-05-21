@@ -94,6 +94,29 @@ export default class Evaluator
     }
 
     /**
+     * Evaluates an `AssignmentStatement` node.
+     *
+     * The target is always an `Identifier` or a `MemberExpression`
+     * (ARCHITECTURE.md §4.10); `#collectPath` walks both shapes
+     * uniformly. The right-hand side is evaluated first, then
+     * `Scope.assign` writes it at the resolved path, creating any
+     * missing intermediate object on the way (SPEC §5.2).
+     *
+     * The expression evaluates to the assigned value, mirroring
+     * JavaScript's `=` semantics.
+     *
+     * @param   {import("../parser/ast/createAssignmentStatement.js").AssignmentStatement} node
+     * @returns {*}
+     */
+    #evaluateAssignmentStatement( node )
+    {
+        const { target , value } = node ;
+        const path     = this.#collectPath( target ) ;
+        const resolved = this.#evaluateNode( value ) ;
+        return this.#scope.assign( path , resolved ) ;
+    }
+
+    /**
      * Evaluates a `CallExpression` node.
      *
      * Arguments are evaluated left-to-right, eagerly, even when the
@@ -203,8 +226,9 @@ export default class Evaluator
     /**
      * Dispatches AST evaluation on `node.type`. As of sub-step 6.3
      * supported types are `Program`, `Literal`, `Identifier`,
-     * `MemberExpression`, `CallExpression` and `NewExpression`;
-     * every other node type raises `EdenTypeError`.
+     * `MemberExpression`, `CallExpression`, `NewExpression` and
+     * `AssignmentStatement`; every other node type raises
+     * `EdenTypeError`.
      *
      * @param   {{type: string}} node
      * @returns {*}
@@ -247,6 +271,12 @@ export default class Evaluator
             {
                 return this.#evaluateNewExpression(
                     /** @type {import("../parser/ast/createNewExpression.js").NewExpression} */ ( node )
+                ) ;
+            }
+            case NodeType.ASSIGNMENT_STATEMENT :
+            {
+                return this.#evaluateAssignmentStatement(
+                    /** @type {import("../parser/ast/createAssignmentStatement.js").AssignmentStatement} */ ( node )
                 ) ;
             }
             default :

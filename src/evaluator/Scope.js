@@ -9,6 +9,7 @@
  */
 
 import EdenReferenceError from "../errors/EdenReferenceError.js" ;
+import EdenTypeError      from "../errors/EdenTypeError.js" ;
 
 /**
  * Scope wrapper. The class is internal and not part of the public
@@ -77,8 +78,53 @@ export default class Scope
     }
 
     /**
+     * Assigns `value` at the location reached by walking `path` from
+     * the scope root, **creating missing intermediates as needed**
+     * per SPEC §5.2. Every intermediate that resolves to `null` or
+     * `undefined` is replaced by a fresh empty object before the
+     * descent continues; primitives like strings or numbers are
+     * left untouched, so writing through them yields the native
+     * JavaScript `TypeError` (intentional — the eden script is
+     * unambiguously buggy and we surface the standard error).
+     *
+     * The method returns the assigned value, mirroring the
+     * JavaScript semantics of an assignment expression.
+     *
+     * @param   {string[]} path
+     * @param   {*}        value
+     * @returns {*}
+     * @throws  {EdenTypeError} - When `path` is empty.
+     */
+    assign( path , value )
+    {
+        if ( path.length === 0 )
+        {
+            throw new EdenTypeError(
+                "Cannot assign to an empty path."
+            ) ;
+        }
+
+        let current = this.#root ;
+
+        for ( let i = 0 ; i < path.length - 1 ; i += 1 )
+        {
+            const segment = path[ i ] ;
+            const next    = current[ segment ] ;
+            if ( next === null || next === undefined )
+            {
+                current[ segment ] = {} ;
+            }
+            current = current[ segment ] ;
+        }
+
+        const lastSegment = path[ path.length - 1 ] ;
+        current[ lastSegment ] = value ;
+        return value ;
+    }
+
+    /**
      * The underlying root object. Read-only accessor; the evaluator
-     * mutates it directly for assignment statements (sub-step 6.5).
+     * mutates it directly for assignment statements.
      *
      * @returns {object}
      */
